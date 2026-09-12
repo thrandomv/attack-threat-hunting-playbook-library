@@ -1,0 +1,63 @@
+title: LSASS Memory Dump via Known Tooling or comsvcs MiniDump
+id: 2bb7f001-43d0-4a01-8c01-7d6a1f010001
+status: experimental
+description: |
+  Detects process creation consistent with reading credential material out of LSASS: a known
+  dumping utility invoked against lsass.exe, the comsvcs.dll MiniDump export called through
+  rundll32.exe, or credential-parsing command syntax. Command-line evidence is the weakest half of
+  T1003.001 - pair this rule with Sysmon Event ID 10 handle-access monitoring, which is what
+  catches renamed tooling, Task Manager dumps, and direct syscalls.
+references:
+  - https://attack.mitre.org/techniques/T1003/001/
+  - https://attack.mitre.org/detectionstrategies/DET0363
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.credential-access
+  - attack.t1003.001
+  - detection.threat-hunting
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_dumper_tool:
+    Image|endswith:
+      - '\procdump.exe'
+      - '\procdump64.exe'
+      - '\createdump.exe'
+      - '\nanodump.exe'
+      - '\dumpert.exe'
+    CommandLine|contains: 'lsass'
+  selection_comsvcs:
+    Image|endswith: '\rundll32.exe'
+    CommandLine|contains|all:
+      - 'comsvcs'
+      - 'inidump'
+  selection_credential_tooling:
+    CommandLine|contains:
+      - 'sekurlsa::'
+      - 'lsadump::'
+      - 'logonpasswords'
+      - 'Invoke-Mimikatz'
+      - 'nanodump'
+  selection_generic_dump:
+    CommandLine|contains|all:
+      - 'lsass'
+      - '.dmp'
+  filter_crash_handler:
+    Image|endswith:
+      - '\WerFault.exe'
+      - '\WerFaultSecure.exe'
+    ParentImage|endswith: '\svchost.exe'
+  condition: 1 of selection_* and not 1 of filter_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Crash diagnostics collected by support staff or vendor performance tooling.
+  - Authorised security validation and memory-forensics training.
+  - Backup or monitoring agents that snapshot process memory; verify signer, path and parent, not image name.
+level: high

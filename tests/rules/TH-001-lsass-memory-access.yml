@@ -1,0 +1,60 @@
+rule: TH-001-lsass-memory-access
+description: >
+  True positives cover the three command-line-visible dump paths. False positives cover the two
+  patterns that generated the tuning notes: a dump of a non-LSASS process, and rundll32 running an
+  ordinary Control Panel applet.
+cases:
+  - name: ProcDump full memory dump of lsass
+    expect: match
+    event:
+      Image: 'C:\Tools\procdump64.exe'
+      CommandLine: 'procdump64.exe -accepteula -ma lsass.exe C:\Windows\Temp\out.dmp'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\svc-backup'
+
+  - name: comsvcs.dll MiniDump export through rundll32
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\rundll32.exe'
+      CommandLine: 'rundll32.exe C:\Windows\System32\comsvcs.dll, MiniDump 704 C:\ProgramData\l.bin full'
+      ParentImage: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      User: 'CONTOSO\administrator'
+
+  - name: Mimikatz sekurlsa syntax
+    expect: match
+    event:
+      Image: 'C:\Users\Public\svc.exe'
+      CommandLine: 'svc.exe "privilege::debug" "sekurlsa::logonpasswords" exit'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Generic dump written for lsass by a renamed tool
+    expect: match
+    event:
+      Image: 'C:\Windows\Temp\svchost32.exe'
+      CommandLine: 'svchost32.exe -ma lsass C:\Windows\Temp\lsass.dmp'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+
+  - name: ProcDump against a non-LSASS process is not this technique
+    expect: no_match
+    event:
+      Image: 'C:\Tools\procdump64.exe'
+      CommandLine: 'procdump64.exe -accepteula -ma w3wp.exe C:\dumps\w3wp.dmp'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\svc-appsupport'
+
+  - name: rundll32 running a normal Control Panel applet
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\rundll32.exe'
+      CommandLine: 'rundll32.exe shell32.dll,Control_RunDLL desk.cpl'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: WerFault crash handling spawned by svchost
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\WerFault.exe'
+      CommandLine: 'WerFault.exe -pss -s 468 -p 704 -ip 704'
+      ParentImage: 'C:\Windows\System32\svchost.exe'
+      User: 'NT AUTHORITY\SYSTEM'

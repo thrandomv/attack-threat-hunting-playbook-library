@@ -1,0 +1,48 @@
+// TH-011 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Find suspicious scheduled task creation or modification, locally and remotely.
+// Required data: DeviceProcessEvents. Pair with Security 4698/4702 (task XML) where available.
+// ATT&CK: T1053.005 | Detection strategy DET0441 / AN1221
+// Tunable: writable paths (CommandLineEntropyThreshold), ApprovedTaskCreators (UserContext)
+let Lookback = 7d;
+let ApprovedTaskCreators = dynamic([]);      // e.g. "svc-sccm"; pair with the parent process below.
+let ApprovedParents = dynamic([]);           // e.g. "ccmexec.exe", "msiexec.exe"
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| extend Cmd = tolower(ProcessCommandLine), Image = tolower(FileName)
+| where (Image == "schtasks.exe" and (Cmd contains "/create" or Cmd contains "/change"))
+     or (Image in~ ("powershell.exe", "pwsh.exe")
+         and (Cmd contains "register-scheduledtask" or Cmd contains "set-scheduledtask"
+              or Cmd contains "new-scheduledtaskaction"))
+| where tolower(AccountName) !in~ (ApprovedTaskCreators)
+     or tolower(InitiatingProcessFileName) !in~ (ApprovedParents)
+| extend RemoteTarget   = Cmd matches regex @"/s\s+\S+" or Cmd contains "-cimsession",
+         Elevated       = Cmd contains "/ru system" or Cmd contains "/rl highest"
+                          or Cmd contains "-runlevel highest" or Cmd contains "\"nt authority\\system\"",
+         InterpreterAction = Cmd contains "powershell" or Cmd contains "pwsh" or Cmd contains "cmd.exe"
+                          or Cmd contains "wscript" or Cmd contains "cscript" or Cmd contains "mshta"
+                          or Cmd contains "rundll32" or Cmd contains "regsvr32",
+         EncodedOrRemote= Cmd contains "-enc" or Cmd contains "encodedcommand" or Cmd contains "http://"
+                          or Cmd contains "https://" or Cmd contains "\\\\",
+         WritablePath   = Cmd contains "\\appdata\\" or Cmd contains "\\users\\public\\"
+                          or Cmd contains "\\windows\\temp\\" or Cmd contains "\\downloads\\"
+                          or Cmd contains "\\programdata\\",
+         BootOrLogon    = Cmd contains "/sc onstart" or Cmd contains "/sc onlogon" or Cmd contains "/sc onidle"
+                          or Cmd contains "atlogon" or Cmd contains "atstartup"
+| where RemoteTarget or EncodedOrRemote or WritablePath or (Elevated and InterpreterAction)
+     or (BootOrLogon and InterpreterAction)
+| extend SignalCount = toint(RemoteTarget) + toint(Elevated) + toint(InterpreterAction)
+                     + toint(EncodedOrRemote) + toint(WritablePath) + toint(BootOrLogon)
+| project Timestamp, DeviceName, AccountDomain, AccountName, FileName, ProcessCommandLine,
+          InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName,
+          SignalCount, RemoteTarget, Elevated, InterpreterAction, EncodedOrRemote, WritablePath, BootOrLogon
+| order by SignalCount desc, Timestamp desc
+//
+// Companion (Sentinel, Security 4698) - catches COM/WMI-created tasks with no command line:
+// SecurityEvent
+// | where TimeGenerated > ago(Lookback) and EventID in (4698, 4702)
+// | extend TaskName = tostring(column_ifexists("TaskName", "")),
+//          TaskXml  = tolower(tostring(column_ifexists("TaskContent", column_ifexists("TaskContentNew", ""))))
+// | where TaskXml contains "powershell" or TaskXml contains "cmd.exe" or TaskXml contains "mshta"
+//      or TaskXml contains "\\appdata\\" or TaskXml contains "\\users\\public\\"
+//      or TaskXml contains "http://" or TaskXml contains "https://"
+// | project TimeGenerated, Computer, EventID, TaskName, SubjectAccount = column_ifexists("SubjectAccount", ""), TaskXml

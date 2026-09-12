@@ -1,0 +1,129 @@
+# MkDocs configuration.
+#
+# docs_dir points at site-src/, which is assembled by .github/workflows/pages.yml as a mirror of the
+# repository's markdown tree. Mirroring the layout means every relative link in the repository works
+# unchanged on the published site - no duplicated content, no rewritten paths.
+#
+# Build locally with:
+#   make site        # assemble site-src/ and serve on http://127.0.0.1:8000
+
+site_name: ATT&CK Threat Hunting Playbook Library
+site_description: >-
+  Twenty-five hypothesis-driven threat hunts with KQL and Sigma, unit-tested detection logic, and
+  ATT&CK v19 detection-strategy alignment.
+site_author: Hamza Khella
+repo_url: https://github.com/thrandomv/attack-threat-hunting-playbook-library
+repo_name: attack-threat-hunting-playbook-library
+edit_uri: ""
+docs_dir: site-src
+site_dir: site
+copyright: MIT licensed. MITRE ATT&CK&reg; is a registered trademark of The MITRE Corporation.
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - search.highlight
+    - search.suggest
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+
+plugins:
+  - search
+
+# BEGIN GENERATED NAV
+nav:
+  - Home: index.md
+  - Documentation home: docs/index.md
+  - Getting started:
+      - Deployment: docs/DEPLOYMENT.md
+      - Telemetry requirements: docs/TELEMETRY.md
+      - Data model: docs/DATA_MODEL.md
+      - Lab setup: docs/LAB.md
+  - Playbooks:
+      - Index: playbooks/README.md
+      - TH-001 LSASS memory access and credential dumping: playbooks/TH-001-lsass-memory-access.md
+      - TH-002 DCSync directory replication abuse: playbooks/TH-002-dcsync-replication-abuse.md
+      - TH-003 Kerberoasting service ticket harvesting: playbooks/TH-003-kerberoasting.md
+      - TH-004 Pass the Hash and NTLM credential reuse: playbooks/TH-004-pass-the-hash.md
+      - TH-005 PsExec-style remote service execution: playbooks/TH-005-psexec-remote-services.md
+      - TH-006 RDP lateral movement and session fan-out: playbooks/TH-006-rdp-lateral-movement.md
+      - TH-007 WinRM and PowerShell remoting abuse: playbooks/TH-007-winrm-powershell-remoting.md
+      - TH-008 DNS tunneling and encoded DNS traffic: playbooks/TH-008-dns-tunneling.md
+      - TH-009 Suspicious PowerShell execution: playbooks/TH-009-suspicious-powershell.md
+      - TH-010 LOLBin system binary proxy execution: playbooks/TH-010-lolbins-proxy-execution.md
+      - TH-011 Scheduled task persistence and remote task creation: playbooks/TH-011-scheduled-task-persistence.md
+      - TH-012 Windows service creation and modification: playbooks/TH-012-windows-service-creation.md
+      - TH-013 Account creation and privileged group manipulation: playbooks/TH-013-account-group-manipulation.md
+      - TH-014 Defence impairment and log tampering: playbooks/TH-014-impair-defenses.md
+      - TH-015 Obfuscated and encoded command execution: playbooks/TH-015-obfuscated-command-execution.md
+      - TH-016 Ingress tool transfer with native utilities: playbooks/TH-016-ingress-tool-transfer.md
+      - TH-017 Web shell behaviour on internet-facing servers: playbooks/TH-017-web-shell-behavior.md
+      - TH-018 Password spraying against Entra ID: playbooks/TH-018-password-spraying.md
+      - TH-019 Data archiving and local staging before exfiltration: playbooks/TH-019-archive-stage-data.md
+      - TH-020 WMI execution and remote process creation: playbooks/TH-020-wmi-remote-execution.md
+      - TH-021 AD CS certificate abuse (ESC1-style misissuance): playbooks/TH-021-adcs-certificate-abuse.md
+      - TH-022 NTLM authentication coercion and relay: playbooks/TH-022-ntlm-coercion-relay.md
+      - TH-023 Entra application consent and credential abuse: playbooks/TH-023-entra-oauth-consent-abuse.md
+      - TH-024 Inhibit system recovery (ransomware precursor): playbooks/TH-024-inhibit-system-recovery.md
+      - TH-025 Linux cron and systemd persistence: playbooks/TH-025-linux-cron-systemd-persistence.md
+  - Detection engineering:
+      - Testing and the Sigma engine: docs/TESTING.md
+      - Validation strategy: docs/VALIDATION.md
+      - Atomic Red Team validation: docs/ATOMIC_VALIDATION.md
+      - Tuning methodology: docs/TUNING.md
+      - Triage workflow: docs/TRIAGE.md
+      - Operating model: docs/OPERATING_MODEL.md
+      - Metrics: docs/METRICS.md
+  - Reference:
+      - ATT&CK coverage matrix: mappings/attack-coverage.md
+      - Detection strategies: docs/DETECTION_STRATEGIES.md
+      - Legacy technique IDs: mappings/legacy-technique-ids.md
+      - Atomic coverage: validation/atomic-coverage.md
+      - KQL style guide: docs/KQL_STYLE.md
+      - Sigma style guide: docs/SIGMA_STYLE.md
+      - Architecture: docs/ARCHITECTURE.md
+      - Design decisions: docs/DESIGN_DECISIONS.md
+      - Roadmap: docs/ROADMAP.md
+      - References: docs/REFERENCES.md
+  - Project:
+      - Portfolio walkthrough: docs/PORTFOLIO_WALKTHROUGH.md
+      - Publishing checklist: docs/GITHUB_PUBLISHING.md
+      - Contributing: CONTRIBUTING.md
+      - Security policy: SECURITY.md
+      - Disclaimer: DISCLAIMER.md
+      - Changelog: CHANGELOG.md
+# END GENERATED NAV

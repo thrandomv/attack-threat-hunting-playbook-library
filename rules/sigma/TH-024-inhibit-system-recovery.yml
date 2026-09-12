@@ -1,0 +1,72 @@
+title: System Recovery Inhibited - Shadow Copies, Backups or Recovery Disabled
+id: 2bb7f024-43d0-4a24-8c24-7d6a1f240024
+status: experimental
+description: |
+  Detects destruction of recovery capability: shadow copy deletion through vssadmin, wmic or
+  PowerShell, shadow storage resized so small that copies are silently discarded, backup catalog and
+  system state backup deletion, boot recovery disabled through bcdedit or reagentc, and System
+  Restore disabled. On a production system a single confirmed match is a ransomware-stage incident,
+  not a hunt lead. Ransomware that calls the VSS COM API directly leaves no command line - EDR
+  behavioural detection is the only coverage for that variant.
+references:
+  - https://attack.mitre.org/techniques/T1490/
+  - https://attack.mitre.org/detectionstrategies/DET0329
+author: Hamza Khella
+date: 2026-09-10
+modified: 2026-09-10
+tags:
+  - attack.impact
+  - attack.t1490
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_vssadmin_delete:
+    Image|endswith: '\vssadmin.exe'
+    CommandLine|contains|all:
+      - 'delete'
+      - 'shadow'
+  selection_vssadmin_resize:
+    Image|endswith: '\vssadmin.exe'
+    CommandLine|contains|all:
+      - 'resize'
+      - 'shadowstorage'
+  selection_wmic_shadowcopy:
+    CommandLine|contains|all:
+      - 'shadowcopy'
+      - 'delete'
+  selection_wmi_class_delete:
+    CommandLine|contains|all:
+      - 'Win32_ShadowCopy'
+      - 'Delete'
+  selection_wbadmin_delete:
+    Image|endswith: '\wbadmin.exe'
+    CommandLine|contains|all:
+      - 'delete'
+      - 'catalog'
+  selection_wbadmin_systemstate:
+    Image|endswith: '\wbadmin.exe'
+    CommandLine|contains: 'delete systemstatebackup'
+  selection_bcdedit_recovery:
+    Image|endswith: '\bcdedit.exe'
+    CommandLine|contains:
+      - 'recoveryenabled no'
+      - 'bootstatuspolicy ignoreallfailures'
+  selection_reagentc_disable:
+    Image|endswith: '\reagentc.exe'
+    CommandLine|contains: '/disable'
+  selection_restore_disable:
+    CommandLine|contains:
+      - 'Disable-ComputerRestore'
+      - 'SRRemoveRestorePoint'
+  condition: 1 of selection_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Backup products managing their own shadow copies; allowlist by the product's full parent path.
+  - Disk-space maintenance scripts that prune old shadow copies during a change window.
+  - Imaging and provisioning workflows.
+level: critical

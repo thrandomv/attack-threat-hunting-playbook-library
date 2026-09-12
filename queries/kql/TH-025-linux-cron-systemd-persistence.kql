@@ -1,0 +1,64 @@
+// TH-025 | Surface: Microsoft Defender XDR advanced hunting (Defender for Endpoint on Linux)
+// Purpose: Find cron and systemd persistence created or modified on Linux hosts.
+// Required data: DeviceProcessEvents and DeviceFileEvents from Linux sensors.
+// ATT&CK: T1543.002, T1053.003 | Detection strategies DET0253 / AN0701, DET0290 / AN0805
+// Tunable: SuspiciousPaths (ExecStartPathAllowlist), UnitDirectories (ServicePathRegex),
+//          ApprovedActors (UserContextFilter)
+let Lookback = 7d;
+let SuspiciousPaths = dynamic(["/tmp/", "/dev/shm/", "/var/tmp/", "/home/", "/root/", "/run/user/"]);
+let CronPaths = dynamic(["/etc/cron.d/", "/etc/cron.daily/", "/etc/cron.hourly/", "/etc/cron.weekly/",
+                         "/etc/cron.monthly/", "/var/spool/cron/", "/etc/crontab"]);
+let UnitDirectories = dynamic(["/etc/systemd/system/", "/usr/lib/systemd/system/",
+                               "/lib/systemd/system/", "/run/systemd/system/", "/.config/systemd/user/"]);
+let ApprovedActors = dynamic(["apt", "apt-get", "dpkg", "yum", "dnf", "rpm", "zypper", "snapd",
+                              "puppet", "ansible-playbook", "chef-client", "salt-minion"]);
+// Branch 1: command evidence.
+let ProcessEvidence = DeviceProcessEvents
+    | where Timestamp > ago(Lookback)
+    | extend Cmd = tolower(ProcessCommandLine), Image = tolower(FileName),
+             Parent = tolower(InitiatingProcessFileName)
+    | where Parent !in~ (ApprovedActors) and Image !in~ (ApprovedActors)
+    | where (Image == "crontab" and not(Cmd contains " -l"))
+         or (Image == "systemctl" and (Cmd contains "enable" or Cmd contains "start" or Cmd contains "daemon-reload"))
+         or Image == "systemd-run"
+         or (Cmd has_any (CronPaths) and (Cmd contains "tee" or Cmd contains "cp " or Cmd contains "mv "
+                                          or Cmd contains "echo" or Cmd contains ">"))
+         or (Cmd has_any (UnitDirectories) and (Cmd contains "tee" or Cmd contains "cp " or Cmd contains "mv "
+                                                or Cmd contains "cat " or Cmd contains ">"))
+    | extend SuspiciousPayload = Cmd has_any (SuspiciousPaths)
+                                 or Cmd contains "curl" or Cmd contains "wget"
+                                 or Cmd contains "base64 -d" or Cmd contains "| sh" or Cmd contains "| bash"
+                                 or Cmd contains "nc " or Cmd contains "/dev/tcp/",
+             EvidenceType = "process"
+    | project Timestamp, DeviceName, AccountName, EvidenceType, FileName, ProcessCommandLine,
+              InitiatingProcessFileName, InitiatingProcessCommandLine, SuspiciousPayload,
+              TargetPath = "";
+// Branch 2: file evidence - adversaries frequently write the unit or cron file directly.
+let FileEvidence = DeviceFileEvents
+    | where Timestamp > ago(Lookback)
+    | where ActionType in ("FileCreated", "FileModified", "FileRenamed")
+    | extend Path = tolower(strcat(FolderPath, "/", FileName))
+    | where Path has_any (CronPaths) or Path has_any (UnitDirectories)
+    | where tolower(InitiatingProcessFileName) !in~ (ApprovedActors)
+    | extend SuspiciousPayload = tolower(InitiatingProcessCommandLine) has_any (SuspiciousPaths),
+             EvidenceType = "file"
+    | project Timestamp, DeviceName, AccountName = InitiatingProcessAccountName, EvidenceType,
+              FileName, ProcessCommandLine = InitiatingProcessCommandLine,
+              InitiatingProcessFileName, InitiatingProcessCommandLine, SuspiciousPayload,
+              TargetPath = Path;
+union ProcessEvidence, FileEvidence
+| extend Assessment = case(
+    SuspiciousPayload and EvidenceType == "file", "Persistence file written with a suspicious payload reference",
+    SuspiciousPayload,                            "Persistence command with a suspicious payload reference",
+    EvidenceType == "file",                       "Cron or systemd file created or modified",
+                                                  "Cron or systemd persistence command")
+| project Timestamp, DeviceName, AccountName, Assessment, EvidenceType, TargetPath, FileName,
+          ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine, SuspiciousPayload
+| order by SuspiciousPayload desc, Timestamp desc
+//
+// Inventory first (the legitimate set is stable and mostly package-installed):
+// DeviceFileEvents
+// | where Timestamp > ago(30d) and FolderPath has_any (UnitDirectories)
+// | summarize Writes = count(), Hosts = dcount(DeviceName), Actors = make_set(InitiatingProcessFileName, 20)
+//             by FileName
+// | order by Writes desc

@@ -1,0 +1,52 @@
+rule: TH-006-rdp-lateral-movement
+description: >
+  Base cases separate RemoteInteractive from network logons and exclude machine accounts. The
+  correlation must fire on three destinations in the window and stay silent on repeated sessions to
+  one host, which is the helpdesk reconnect pattern.
+cases:
+  - name: RemoteInteractive logon from a remote address
+    expect: match
+    target: th006_rdp_interactive_logon
+    event:
+      EventID: 4624
+      LogonType: 10
+      TargetUserName: 'adm-jdoe'
+      IpAddress: '10.10.20.31'
+      Computer: 'SRV01.contoso.local'
+
+  - name: Network logon is not RDP
+    expect: no_match
+    target: th006_rdp_interactive_logon
+    event:
+      EventID: 4624
+      LogonType: 3
+      TargetUserName: 'adm-jdoe'
+      IpAddress: '10.10.20.31'
+      Computer: 'SRV01.contoso.local'
+
+  - name: Machine account logon
+    expect: no_match
+    target: th006_rdp_interactive_logon
+    event:
+      EventID: 4624
+      LogonType: 10
+      TargetUserName: 'SRV02$'
+      IpAddress: '10.10.20.31'
+      Computer: 'SRV01.contoso.local'
+
+  - name: Three destinations in twenty minutes
+    expect: match
+    target: 2bb7f106-43d0-4b06-8d06-7d6a1f060106
+    events:
+      - {timestamp: '2026-09-03T22:10:00Z', EventID: 4624, LogonType: 10, TargetUserName: 'adm-jdoe', IpAddress: '10.10.20.31', Computer: 'SRV01'}
+      - {timestamp: '2026-09-03T22:18:00Z', EventID: 4624, LogonType: 10, TargetUserName: 'adm-jdoe', IpAddress: '10.10.20.31', Computer: 'SRV02'}
+      - {timestamp: '2026-09-03T22:27:00Z', EventID: 4624, LogonType: 10, TargetUserName: 'adm-jdoe', IpAddress: '10.10.20.31', Computer: 'DC01'}
+
+  - name: Repeated reconnects to a single host
+    expect: no_match
+    target: 2bb7f106-43d0-4b06-8d06-7d6a1f060106
+    events:
+      - {timestamp: '2026-09-03T09:00:00Z', EventID: 4624, LogonType: 10, TargetUserName: 'helpdesk1', IpAddress: '10.10.20.44', Computer: 'WKS-9001'}
+      - {timestamp: '2026-09-03T09:10:00Z', EventID: 4624, LogonType: 10, TargetUserName: 'helpdesk1', IpAddress: '10.10.20.44', Computer: 'WKS-9001'}
+      - {timestamp: '2026-09-03T09:20:00Z', EventID: 4624, LogonType: 10, TargetUserName: 'helpdesk1', IpAddress: '10.10.20.44', Computer: 'WKS-9001'}
+      - {timestamp: '2026-09-03T09:25:00Z', EventID: 4624, LogonType: 10, TargetUserName: 'helpdesk1', IpAddress: '10.10.20.44', Computer: 'WKS-9001'}

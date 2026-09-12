@@ -1,0 +1,65 @@
+// TH-023 | Surface: Microsoft Sentinel / Log Analytics
+// Purpose: Find OAuth consent grants with sensitive scopes and credentials added to service principals.
+// Required data: Entra ID AuditLogs (application and directory management categories).
+// ATT&CK: T1528, T1098.001 | Detection strategies DET0515 / AN1425, DET0531 / AN1469
+// Tunable: HighRiskScopes (OAuthScopeSensitivity), ApprovedAppIds (ClientAppIDAllowList),
+//          ApprovedCredentialActors (CallerIdentityContext)
+let Lookback = 30d;
+let HighRiskScopes = dynamic(["mail.read", "mail.readwrite", "mail.send", "mailboxsettings.readwrite",
+                              "files.read.all", "files.readwrite.all", "sites.read.all", "sites.readwrite.all",
+                              "directory.read.all", "directory.readwrite.all", "user.readwrite.all",
+                              "application.readwrite.all", "approleassignment.readwrite.all",
+                              "full_access_as_user", "offline_access", "group.readwrite.all"]);
+let ApprovedAppIds = dynamic([]);            // Allowlist by application ID; display names are attacker-controlled.
+let ApprovedCredentialActors = dynamic([]);  // Application lifecycle platform service accounts.
+let ConsentOperations = dynamic(["Consent to application", "Add delegated permission grant",
+                                 "Add app role assignment to service principal",
+                                 "Add app role assignment grant to user"]);
+let CredentialOperations = dynamic(["Add service principal credentials",
+                                    "Update application - Certificates and secrets management",
+                                    "Update service principal", "Add owner to application",
+                                    "Add owner to service principal"]);
+AuditLogs
+| where TimeGenerated > ago(Lookback)
+| where OperationName in~ (ConsentOperations) or OperationName in~ (CredentialOperations)
+| extend Actor = tostring(coalesce(InitiatedBy.user.userPrincipalName, InitiatedBy.app.displayName)),
+         ActorIp = tostring(InitiatedBy.user.ipAddress),
+         TargetApp = tostring(TargetResources[0].displayName),
+         TargetAppId = tostring(TargetResources[0].id),
+         ModifiedProps = tostring(TargetResources[0].modifiedProperties)
+| where TargetAppId !in~ (ApprovedAppIds)
+| extend PropsLower = tolower(ModifiedProps)
+| extend Category = iff(OperationName in~ (ConsentOperations), "consent", "credential"),
+         GrantedScopes = extract(@'(?i)"?ConsentAction.Permissions"?[^"]*"([^"]*)"', 1, ModifiedProps),
+         IsApplicationPermission = PropsLower contains "approleassignment"
+                                   or PropsLower contains "\"apppermissions\""
+                                   or PropsLower contains "application permissions"
+| extend HighRiskScopeHit = PropsLower has_any (HighRiskScopes)
+| extend Severity = case(
+    Category == "consent" and HighRiskScopeHit and IsApplicationPermission,
+        "critical - app-only grant with sensitive scopes",
+    Category == "consent" and HighRiskScopeHit,
+        "high - delegated grant with sensitive scopes",
+    Category == "credential" and Actor !in~ (ApprovedCredentialActors),
+        "high - credential added to a service principal",
+    "medium - review application change")
+| project TimeGenerated, Severity, Category, OperationName, Actor, ActorIp, TargetApp, TargetAppId,
+          HighRiskScopeHit, IsApplicationPermission, GrantedScopes, Result, ModifiedProps
+| order by TimeGenerated desc
+//
+// Follow the token: what did the application do after the grant?
+// SigninLogs
+// | where TimeGenerated > ago(Lookback)
+// | where isnotempty(ServicePrincipalId)
+// | summarize SignIns = count(), Ips = make_set(IPAddress, 20), Resources = make_set(ResourceDisplayName, 20),
+//             FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+//             by ServicePrincipalName, ServicePrincipalId
+// | order by SignIns desc
+//
+// Tenant-wide consent inventory (run once before deployment - most tenants find surprises):
+// AuditLogs
+// | where TimeGenerated > ago(365d) and OperationName in~ (ConsentOperations)
+// | summarize Grants = count(), Actors = dcount(tostring(InitiatedBy.user.userPrincipalName)),
+//             FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+//             by AppId = tostring(TargetResources[0].id), AppName = tostring(TargetResources[0].displayName)
+// | order by Grants desc

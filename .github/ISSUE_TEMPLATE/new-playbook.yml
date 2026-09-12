@@ -1,0 +1,59 @@
+name: New playbook proposal
+description: Propose a hunt for a technique the library does not cover
+title: "[Playbook] "
+labels: [new-playbook, detection-content]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A playbook is accepted when it can be tuned and argued with, not just read. See
+        [CONTRIBUTING.md](../blob/main/CONTRIBUTING.md) for what a complete one needs.
+  - type: input
+    id: technique
+    attributes:
+      label: ATT&CK technique
+      description: Current (non-revoked) ID and name. Check mappings/legacy-technique-ids.md if unsure.
+      placeholder: "T1556.006 — Modify Authentication Process: Multi-Factor Authentication"
+    validations:
+      required: true
+  - type: textarea
+    id: hypothesis
+    attributes:
+      label: Hypothesis
+      description: A falsifiable statement about adversary behaviour.
+    validations:
+      required: true
+  - type: textarea
+    id: telemetry
+    attributes:
+      label: Required telemetry
+      description: What must be collected, and any audit policy or sensor configuration it depends on.
+    validations:
+      required: true
+  - type: textarea
+    id: discriminator
+    attributes:
+      label: What discriminates malicious from benign
+      description: The attribute that separates the technique from the administrative activity it resembles. This is the hard part.
+    validations:
+      required: true
+  - type: textarea
+    id: blindspots
+    attributes:
+      label: Known blind spots
+      description: The evasion that would defeat this detection.
+    validations:
+      required: true
+  - type: input
+    id: atomics
+    attributes:
+      label: Atomic Red Team GUIDs
+      description: Leave blank if none exist upstream — that is a valid answer and will be documented as such.
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: This is defensive content for authorised environments.
+          required: true
+        - label: I can supply a true-positive and a false-positive test case.

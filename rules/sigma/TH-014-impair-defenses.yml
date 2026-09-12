@@ -1,0 +1,97 @@
+title: Defence Impairment - Tooling Disabled, Excluded or Logs Cleared
+id: 2bb7f014-43d0-4a14-8c14-7d6a1f140014
+status: experimental
+description: |
+  Detects commands that reduce defensive visibility: clearing event logs, changing antimalware
+  configuration or adding exclusions, stopping or disabling security services, disabling the host
+  firewall, weakening audit policy, and tampering with AMSI, ETW or LSA protection. ATT&CK v19
+  renumbered this behaviour from T1562.001 to T1685 and moved it to the Defense Impairment tactic;
+  log clearing moved from T1070.001 to T1685.005. Recovery deletion is T1490 and lives in TH-024.
+references:
+  - https://attack.mitre.org/techniques/T1685/
+  - https://attack.mitre.org/techniques/T1685/005/
+  - https://attack.mitre.org/detectionstrategies/DET0497
+  - https://attack.mitre.org/detectionstrategies/DET0532
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.defense-impairment
+  - attack.t1685
+  - attack.t1685.005
+  - attack.t1112
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_log_clear_tool:
+    Image|endswith: '\wevtutil.exe'
+    CommandLine|contains:
+      - ' cl '
+      - ' clear-log'
+  selection_log_clear_cmdlet:
+    CommandLine|contains:
+      - 'Clear-EventLog'
+      - 'Remove-EventLog'
+      - 'ClearEventLog'
+  selection_defender_change:
+    CommandLine|contains:
+      - 'Set-MpPreference'
+      - 'Add-MpPreference'
+      - 'DisableRealtimeMonitoring'
+      - 'DisableBehaviorMonitoring'
+      - 'DisableScriptScanning'
+      - 'ExclusionPath'
+      - 'ExclusionProcess'
+      - 'ExclusionExtension'
+      - '-RemoveDefinitions'
+  selection_service_stop:
+    Image|endswith:
+      - '\sc.exe'
+      - '\net.exe'
+      - '\net1.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'windefend'
+      - 'sysmon'
+      - 'wdnissvc'
+      - 'wdfilter'
+      - 'sense'
+      - 'eventlog'
+  selection_firewall_off:
+    Image|endswith: '\netsh.exe'
+    CommandLine|contains|all:
+      - 'firewall'
+      - 'state off'
+  selection_audit_change:
+    Image|endswith: '\auditpol.exe'
+    CommandLine|contains:
+      - '/clear'
+      - '/remove'
+  selection_amsi_etw:
+    CommandLine|contains:
+      - 'AmsiEnable'
+      - 'amsiInitFailed'
+      - 'AmsiUtils'
+      - 'AMSI\Providers'
+      - 'COMPlus_ETWEnabled'
+      - 'RunAsPPL'
+      - 'TamperProtection'
+  filter_query_only:
+    Image|endswith: '\wevtutil.exe'
+    CommandLine|contains:
+      - ' qe '
+      - ' el '
+      - ' gli '
+  condition: 1 of selection_* and not 1 of filter_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Imaging, provisioning and golden-image maintenance.
+  - Installers that add antimalware exclusions for their own directories.
+  - Troubleshooting performed by IT staff during a documented change window.
+level: high

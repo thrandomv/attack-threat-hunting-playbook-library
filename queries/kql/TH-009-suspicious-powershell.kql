@@ -1,0 +1,46 @@
+// TH-009 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Score suspicious PowerShell execution behaviours.
+// Required data: DeviceProcessEvents. Add 4104 script block logging for in-session visibility.
+// ATT&CK: T1059.001 | Detection strategy DET0455 / AN1252
+// Tunable: MinSignalCount (CommandLinePattern), SuspiciousParents (ParentProcessName)
+let Lookback = 7d;
+let MinSignalCount = 2;
+let SuspiciousParents = dynamic(["winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe",
+                                 "msaccess.exe", "acrord32.exe", "mshta.exe", "wscript.exe",
+                                 "cscript.exe", "rundll32.exe", "regsvr32.exe", "wmiprvse.exe",
+                                 "w3wp.exe", "httpd.exe", "nginx.exe", "sqlservr.exe"]);
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| where tolower(FileName) in~ ("powershell.exe", "pwsh.exe")
+    or tolower(coalesce(column_ifexists("ProcessVersionInfoOriginalFileName", ""), ""))
+       in~ ("powershell.exe", "pwsh.dll")   // renamed PowerShell hosts
+| extend Cmd = tolower(ProcessCommandLine)
+| extend Encoded        = Cmd matches regex @"\s-{1,2}e(nc|ncodedcommand|ncoded)?\s+[a-z0-9+/=]{20,}"
+                          or Cmd contains "frombase64string",
+         Hidden         = Cmd contains "-w hidden" or Cmd contains "-windowstyle hidden"
+                          or Cmd contains "-nop" or Cmd contains "-noprofile"
+                          or Cmd contains "-noni" or Cmd contains "-noninteractive",
+         Download       = Cmd contains "downloadstring" or Cmd contains "downloadfile"
+                          or Cmd contains "invoke-webrequest" or Cmd contains "invoke-restmethod"
+                          or Cmd contains "start-bitstransfer" or Cmd contains "net.webclient"
+                          or Cmd contains "msxml2.xmlhttp" or Cmd contains "http://" or Cmd contains "https://",
+         InMemory       = Cmd contains "invoke-expression" or Cmd contains "iex(" or Cmd contains "iex "
+                          or Cmd contains "reflection.assembly" or Cmd contains "invoke-command"
+                          or Cmd contains "[scriptblock]::create",
+         DefenceChange  = Cmd contains "amsiutils" or Cmd contains "amsiinitfailed"
+                          or Cmd contains "set-mppreference" or Cmd contains "add-mppreference"
+                          or Cmd contains "disablerealtimemonitoring" or Cmd contains "exclusionpath"
+                          or Cmd contains "clear-eventlog" or Cmd contains "remove-item -path 'hklm",
+         SuspiciousParent = tolower(InitiatingProcessFileName) in~ (SuspiciousParents),
+         BypassPolicy   = Cmd contains "-ep bypass" or Cmd contains "-executionpolicy bypass"
+                          or Cmd contains "-exec bypass"
+| extend SignalCount = toint(Encoded) + toint(Hidden) + toint(Download) + toint(InMemory)
+                     + toint(DefenceChange) + toint(SuspiciousParent) + toint(BypassPolicy)
+| where SignalCount >= MinSignalCount
+     or DefenceChange
+     or (SuspiciousParent and (Encoded or Download or InMemory))
+| project Timestamp, DeviceName, AccountDomain, AccountName, FileName, FolderPath, SHA256,
+          ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine,
+          InitiatingProcessAccountName, SignalCount, Encoded, Hidden, Download, InMemory,
+          DefenceChange, SuspiciousParent, BypassPolicy
+| order by SignalCount desc, Timestamp desc

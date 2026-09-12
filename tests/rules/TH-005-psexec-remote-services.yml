@@ -1,0 +1,53 @@
+rule: TH-005-psexec-remote-services
+description: >
+  Positives cover the named tool, the renamed-binary case caught by the parent/path branch, and the
+  Impacket smbexec pipe pattern. Negatives cover a normal service starting from Program Files and a
+  Defender platform update, which is the recurring benign services.exe child in most estates.
+cases:
+  - name: PsExec service binary
+    expect: match
+    event:
+      Image: 'C:\Windows\PSEXESVC.exe'
+      CommandLine: 'C:\Windows\PSEXESVC.exe'
+      ParentImage: 'C:\Windows\System32\services.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Renamed service binary spawning cmd from services.exe
+    expect: match
+    event:
+      Image: 'C:\Windows\Temp\updater.exe'
+      CommandLine: 'C:\Windows\Temp\updater.exe'
+      ParentImage: 'C:\Windows\System32\services.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Impacket smbexec pipe pattern
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\cmd.exe'
+      CommandLine: 'cmd.exe /Q /c echo whoami > \\127.0.0.1\C$\__output 2>&1'
+      ParentImage: 'C:\Windows\System32\services.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Normal service starting its own binary
+    expect: no_match
+    event:
+      Image: 'C:\Program Files\Contoso\Agent\agentsvc.exe'
+      CommandLine: '"C:\Program Files\Contoso\Agent\agentsvc.exe"'
+      ParentImage: 'C:\Windows\System32\services.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Defender platform update service child
+    expect: no_match
+    event:
+      Image: 'C:\ProgramData\Microsoft\Windows Defender\Platform\4.18.24010.7-0\MsMpEng.exe'
+      CommandLine: '"MsMpEng.exe"'
+      ParentImage: 'C:\Windows\System32\services.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: PowerShell started by a user, not by services.exe
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe -Command Get-Service'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'

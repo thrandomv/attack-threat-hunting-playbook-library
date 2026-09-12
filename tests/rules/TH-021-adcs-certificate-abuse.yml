@@ -1,0 +1,76 @@
+rule: TH-021-adcs-certificate-abuse
+description: >
+  CA-side cases separate the ESC1 signature (requester-supplied SAN on a user template) from the
+  legitimate web-server template case that would otherwise dominate the alert queue. Endpoint cases
+  cover the tooling rule.
+cases:
+  - name: User template request carrying a SAN for an administrator
+    expect: match
+    target: 2bb7f021-43d0-4a21-8c21-7d6a1f210021
+    event:
+      EventID: 4886
+      Computer: 'CA01.contoso.local'
+      SubjectUserName: 'jdoe'
+      CertificateTemplate: 'User'
+      RequestId: '4471'
+      Attributes: 'CertificateTemplate:User\nsan:upn=administrator@contoso.local'
+
+  - name: ESC1-style issuance recorded on the CA
+    expect: match
+    target: 2bb7f021-43d0-4a21-8c21-7d6a1f210021
+    event:
+      EventID: 4887
+      Computer: 'CA01.contoso.local'
+      SubjectUserName: 'jdoe'
+      CertificateTemplate: 'UserAuth'
+      RequestId: '4472'
+      Attributes: 'san:upn=da-admin@contoso.local'
+
+  - name: Web-server template legitimately carrying a SAN
+    expect: no_match
+    target: 2bb7f021-43d0-4a21-8c21-7d6a1f210021
+    event:
+      EventID: 4886
+      Computer: 'CA01.contoso.local'
+      SubjectUserName: 'svc-pki'
+      CertificateTemplate: 'WebServer'
+      RequestId: '4473'
+      Attributes: 'CertificateTemplate:WebServer\nsan:dns=intranet.contoso.com&dns=www.contoso.com'
+
+  - name: Ordinary user certificate request with no SAN attribute
+    expect: no_match
+    target: 2bb7f021-43d0-4a21-8c21-7d6a1f210021
+    event:
+      EventID: 4886
+      Computer: 'CA01.contoso.local'
+      SubjectUserName: 'jdoe'
+      CertificateTemplate: 'User'
+      RequestId: '4474'
+      Attributes: 'CertificateTemplate:User'
+
+  - name: Certipy execution on an endpoint
+    expect: match
+    target: 2bb7f121-43d0-4b21-8d21-7d6a1f210121
+    event:
+      Image: 'C:\Users\Public\c.exe'
+      CommandLine: 'c.exe certipy req -u jdoe@contoso.local -target ca01.contoso.local -template User -upn administrator@contoso.local'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Rubeus requesting a ticket with a certificate
+    expect: match
+    target: 2bb7f121-43d0-4b21-8d21-7d6a1f210121
+    event:
+      Image: 'C:\Users\Public\r.exe'
+      CommandLine: 'r.exe asktgt /user:administrator /certificate:MIIM0wIBAzCCDI8GCSqGSIb3 /ptt'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Certificate store enumeration with no export or request
+    expect: no_match
+    target: 2bb7f121-43d0-4b21-8d21-7d6a1f210121
+    event:
+      Image: 'C:\Windows\System32\certutil.exe'
+      CommandLine: 'certutil.exe -store My'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\svc-pki'

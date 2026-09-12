@@ -1,0 +1,70 @@
+// TH-008 | Surface: Microsoft Sentinel / Log Analytics
+// Purpose: Find clients with high-volume, high-variation, long-label DNS behaviour.
+// Required data: ASIM normalised DNS via _Im_Dns. Replace the base-domain approximation where possible.
+// ATT&CK: T1071.004 | Detection strategy DET0400 / AN1121-AN1125
+// Tunable: MinQueries + MinUniqueQueries (QueryRatePerClient), MinUniqueRatio (SubdomainEntropyScore),
+//          MinMaxLabelLength (QueryLengthThreshold), KnownGoodSuffixes (DomainReputationFeed)
+let Lookback = 24h;
+let Window = 15m;
+let MinQueries = 100;
+let MinUniqueQueries = 50;
+let MinUniqueRatio = 0.70;
+let MinMaxLabelLength = 45;
+let MinEncodedLikeCount = 25;
+// Vendor domains that legitimately encode data into labels. Maintain as reference data.
+let KnownGoodSuffixes = dynamic([
+  "sophosxl.net", "spamhaus.org", "senderbase.org", "mcafee.com", "trendmicro.com",
+  "avqs.mcafee.com", "cloudfront.net", "akamaiedge.net", "akadns.net", "windowsupdate.com",
+  "office365.com", "events.data.microsoft.com", "dns.msftncsi.com"
+]);
+_Im_Dns(starttime=ago(Lookback), endtime=now())
+| where isnotempty(DnsQuery)
+| extend Query  = tolower(trim_end(@"\.$", DnsQuery)),
+         Client = iff(isnotempty(SrcHostname), SrcHostname, SrcIpAddr)
+| extend Labels = split(Query, "."), LabelCount = array_length(split(Query, "."))
+| extend LeftLabel = tostring(Labels[0]),
+         BaseDomain = iff(LabelCount >= 2,
+                          strcat(tostring(Labels[LabelCount-2]), ".", tostring(Labels[LabelCount-1])),
+                          Query)
+| where not(BaseDomain has_any (KnownGoodSuffixes))
+| extend QueryLength = strlen(Query), LeftLabelLength = strlen(LeftLabel),
+         EncodedLike = LeftLabel matches regex @"^[a-z0-9_-]{35,}$",
+         HexLike     = LeftLabel matches regex @"^[a-f0-9]{24,}$",
+         RareType    = DnsQueryTypeName in~ ("TXT", "NULL", "ANY", "CNAME")
+| summarize QueryCount = count(), UniqueQueries = dcount(Query),
+            UniqueLeftLabels = dcount(LeftLabel), MaxQueryLength = max(QueryLength),
+            MaxLabelLength = max(LeftLabelLength), AvgLabelLength = round(avg(LeftLabelLength), 1),
+            EncodedLikeCount = countif(EncodedLike), HexLikeCount = countif(HexLike),
+            RareTypeCount = countif(RareType),
+            NxDomainCount = countif(EventResultDetails =~ "NXDOMAIN"),
+            QueryTypes = make_set(DnsQueryTypeName, 10), Samples = make_set(Query, 8),
+            FirstSeen = min(EventStartTime), LastSeen = max(EventStartTime)
+            by Client, SrcIpAddr, BaseDomain, bin(EventStartTime, Window)
+| extend UniqueRatio  = round(todouble(UniqueQueries) / QueryCount, 2),
+         NxDomainRatio = round(todouble(NxDomainCount) / QueryCount, 2),
+         RareTypeRatio = round(todouble(RareTypeCount) / QueryCount, 2)
+| where QueryCount >= MinQueries and UniqueQueries >= MinUniqueQueries
+| where UniqueRatio >= MinUniqueRatio
+     or MaxLabelLength >= MinMaxLabelLength
+     or EncodedLikeCount >= MinEncodedLikeCount
+| extend SignalCount = toint(UniqueRatio >= MinUniqueRatio) + toint(MaxLabelLength >= MinMaxLabelLength)
+                     + toint(EncodedLikeCount >= MinEncodedLikeCount) + toint(NxDomainRatio >= 0.30)
+                     + toint(RareTypeRatio >= 0.30)
+| project TimeWindow = EventStartTime, FirstSeen, LastSeen, Client, SrcIpAddr, BaseDomain,
+          SignalCount, QueryCount, UniqueQueries, UniqueRatio, UniqueLeftLabels, MaxQueryLength,
+          MaxLabelLength, AvgLabelLength, EncodedLikeCount, HexLikeCount, NxDomainRatio,
+          RareTypeRatio, QueryTypes, Samples
+| order by SignalCount desc, UniqueRatio desc, QueryCount desc
+//
+// Periodicity companion - low-and-slow beaconing that the thresholds above miss by design:
+// _Im_Dns(starttime=ago(7d), endtime=now())
+// | extend Client = iff(isnotempty(SrcHostname), SrcHostname, SrcIpAddr)
+// | extend Labels = split(tolower(DnsQuery), ".")
+// | extend BaseDomain = strcat(tostring(Labels[array_length(Labels)-2]), ".", tostring(Labels[array_length(Labels)-1]))
+// | order by Client asc, BaseDomain asc, EventStartTime asc
+// | extend Delta = datetime_diff('second', EventStartTime, prev(EventStartTime))
+// | where Delta > 0 and Delta < 3600
+// | summarize Beacons = count(), MedianInterval = percentile(Delta, 50),
+//             IntervalStdDev = stdev(Delta) by Client, BaseDomain
+// | where Beacons >= 20 and IntervalStdDev < MedianInterval * 0.15   // low jitter = automation
+// | order by IntervalStdDev asc

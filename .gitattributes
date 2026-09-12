@@ -1,0 +1,6 @@
+# Surface the detection content in GitHub's language statistics. Without this,
+# linguist excludes YAML (data) and Markdown (prose), so a detection-content
+# repository is reported as a Python project.
+queries/kql/*.kql   linguist-language=Kusto linguist-detectable=true
+rules/sigma/*.yml   linguist-language=YAML  linguist-detectable=true
+tests/rules/*.yml   linguist-language=YAML  linguist-detectable=true

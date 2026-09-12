@@ -1,0 +1,74 @@
+title: Ingress Tool Transfer With a Native Utility
+id: 2bb7f016-43d0-4a16-8c16-7d6a1f160016
+status: experimental
+description: |
+  Detects built-in Windows utilities invoked with transfer-specific switches against a remote
+  location: certutil URL cache, bitsadmin transfers, curl and wget downloads, PowerShell cradles,
+  and script hosts fetching remote content. Local uses of the same binaries (certutil -hashfile,
+  certutil -encode) are intentionally excluded.
+references:
+  - https://attack.mitre.org/techniques/T1105/
+  - https://attack.mitre.org/detectionstrategies/DET0060
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.command-and-control
+  - attack.t1105
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_certutil:
+    Image|endswith: '\certutil.exe'
+    CommandLine|contains:
+      - '-urlcache'
+      - 'urlcache'
+      - '-verifyctl'
+  selection_bitsadmin:
+    Image|endswith: '\bitsadmin.exe'
+    CommandLine|contains:
+      - '/transfer'
+      - '/addfile'
+  selection_curl_wget:
+    Image|endswith:
+      - '\curl.exe'
+      - '\wget.exe'
+    CommandLine|contains:
+      - 'http://'
+      - 'https://'
+      - 'ftp://'
+  selection_powershell_cradle:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'DownloadFile'
+      - 'DownloadString'
+      - 'Invoke-WebRequest'
+      - 'Start-BitsTransfer'
+  selection_script_host:
+    Image|endswith:
+      - '\mshta.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+    CommandLine|contains:
+      - 'http://'
+      - 'https://'
+  filter_certutil_local_use:
+    Image|endswith: '\certutil.exe'
+    CommandLine|contains:
+      - '-hashfile'
+      - '-dump'
+      - '-store'
+  condition: 1 of selection_* and not 1 of filter_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Software updates and package managers fetching from vendor or internal repositories.
+  - Deployment scripts pulling installers from an internal share or artefact store.
+  - Administrators downloading tools from an approved source.
+level: medium

@@ -1,0 +1,63 @@
+title: Archive Utility Used With Encryption, Splitting or Staging
+id: 2bb7f019-43d0-4a19-8c19-7d6a1f190019
+status: experimental
+description: |
+  Detects archive utilities invoked in ways associated with collection for exfiltration: password
+  protection or header encryption, splitting into fixed-size volumes, or writing the archive into a
+  user-writable staging directory. Ordinary compression is out of scope; these three features exist
+  to defeat inspection, size limits and casual discovery.
+references:
+  - https://attack.mitre.org/techniques/T1560/001/
+  - https://attack.mitre.org/techniques/T1074/001/
+  - https://attack.mitre.org/detectionstrategies/DET0298
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.collection
+  - attack.t1560.001
+  - attack.t1074.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_archiver:
+    Image|endswith:
+      - '\7z.exe'
+      - '\7za.exe'
+      - '\rar.exe'
+      - '\winrar.exe'
+      - '\tar.exe'
+      - '\makecab.exe'
+      - '\zip.exe'
+  selection_powershell_archive:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'Compress-Archive'
+      - 'ZipFile]::CreateFromDirectory'
+  sig_password_protected:
+    CommandLine|re: '\s-(hp|p)[^\s]+'
+  sig_header_encryption:
+    CommandLine|contains: '-mhe=on'
+  sig_split_volumes:
+    CommandLine|re: '\s-v\d+[kmgKMG]?(\s|$)'
+  sig_staging_output:
+    CommandLine|contains:
+      - '\Windows\Temp\'
+      - '\Users\Public\'
+      - '\ProgramData\'
+      - '\AppData\Local\Temp\'
+      - '\PerfLogs\'
+  condition: 1 of selection_* and 1 of sig_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Backup jobs and log collection writing into temporary directories.
+  - Software packaging and release builds.
+  - Users compressing files with a password before sending them externally.
+level: medium

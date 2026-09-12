@@ -1,0 +1,61 @@
+rule: TH-024-inhibit-system-recovery
+description: >
+  Positives cover the five destruction verbs, including the shadow-storage resize variant that rules
+  keyed only on "delete" miss. Negatives cover the two legitimate uses of the same binaries: listing
+  shadow copies, and a backup product creating one.
+cases:
+  - name: vssadmin deleting all shadow copies
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\vssadmin.exe'
+      CommandLine: 'vssadmin.exe delete shadows /all /quiet'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: WMI shadow copy deletion
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\wbem\wmic.exe'
+      CommandLine: 'wmic.exe shadowcopy delete /nointeractive'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Backup catalog deletion
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\wbadmin.exe'
+      CommandLine: 'wbadmin.exe delete catalog -quiet'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Boot recovery disabled
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\bcdedit.exe'
+      CommandLine: 'bcdedit.exe /set {default} recoveryenabled No'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Shadow storage resized to discard copies
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\vssadmin.exe'
+      CommandLine: 'vssadmin.exe resize shadowstorage /for=C: /on=C: /maxsize=401MB'
+      ParentImage: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Listing shadow copies
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\vssadmin.exe'
+      CommandLine: 'vssadmin.exe list shadows'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Backup product creating a shadow copy
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\vssadmin.exe'
+      CommandLine: 'vssadmin.exe create shadow /for=D:'
+      ParentImage: 'C:\Program Files\Contoso Backup\backupsvc.exe'
+      User: 'NT AUTHORITY\SYSTEM'

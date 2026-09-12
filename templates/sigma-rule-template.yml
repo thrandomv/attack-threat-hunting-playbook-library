@@ -1,0 +1,75 @@
+# Template for a detection rule plus an optional correlation rule.
+# Remove the second document if the behaviour is observable in a single event.
+# Every rule document needs a fixture in tests/rules/ with at least one true-positive and one
+# false-positive case - the suite fails otherwise.
+
+title: Short, specific statement of the observed behaviour
+name: thNNN_base_event_name        # only needed if a correlation rule references this rule
+id: 00000000-0000-4000-8000-000000000000   # generate a UUID4, then never change it
+status: experimental               # stable | test | experimental | deprecated | unsupported
+description: |
+  What this detects, what it deliberately does not detect, and what an implementer must tune before
+  deployment. At least a few sentences - a one-line description is not enough for someone deciding
+  whether to trust the rule.
+references:
+  - https://attack.mitre.org/techniques/TNNNN/NNN/
+  - https://attack.mitre.org/detectionstrategies/DETNNNN
+author: Your Name
+date: YYYY-MM-DD                   # creation
+modified: YYYY-MM-DD               # only on material change
+tags:
+  - attack.tactic-shortname        # e.g. attack.credential-access, attack.defense-impairment
+  - attack.tnnnn.nnn               # must match the playbook frontmatter; validated in CI
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_anchor:                # the event class this rule applies to
+    Image|endswith: '\example.exe'
+  sig_first_signal:                # sig_* blocks so a quantifier can count them
+    CommandLine|contains: 'something'
+  sig_second_signal:
+    CommandLine|contains: 'something else'
+  filter_known_good:               # filter_* blocks for exclusions
+    ParentImage|endswith: '\trusted.exe'
+  condition: selection_anchor and 1 of sig_* and not 1 of filter_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - A specific administrative workflow, not "legitimate activity".
+  - Another one, named concretely enough that a reader can check for it.
+level: medium                      # standalone confidence, not worst-case technique impact
+
+---
+# Correlation rule: use this when the signal is aggregate (fan-out, breadth, sequence) rather than
+# a single event. Base rules referenced here should be level: informational so they never alert alone.
+title: Aggregate behaviour across events
+id: 00000000-0000-4000-8000-000000000001
+status: experimental
+description: |
+  What the aggregation measures and why a single event is not enough. State how the threshold should
+  be derived locally.
+references:
+  - https://attack.mitre.org/techniques/TNNNN/NNN/
+author: Your Name
+date: YYYY-MM-DD
+modified: YYYY-MM-DD
+tags:
+  - attack.tactic-shortname
+  - attack.tnnnn.nnn
+correlation:
+  type: value_count                # event_count | value_count | temporal | temporal_ordered
+  rules:
+    - thNNN_base_event_name
+  group-by:
+    - SourceField
+  timespan: 15m
+  condition:
+    field: CountedField            # value_count only
+    gte: 10
+falsepositives:
+  - The legitimate process that also fans out, and how to scope it.
+level: high

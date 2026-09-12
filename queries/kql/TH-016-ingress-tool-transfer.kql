@@ -1,0 +1,54 @@
+// TH-016 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Find native utilities used to transfer tooling onto a host.
+// Required data: DeviceProcessEvents. Correlate with DeviceNetworkEvents and DeviceFileEvents.
+// ATT&CK: T1105 | Detection strategy DET0060 / AN0165
+// Tunable: DownloadTools (ToolName), output paths (FilePathRegex), raw-IP branch (DestinationIPCategory)
+let Lookback = 7d;
+let ApprovedDownloadSources = dynamic([]);   // e.g. "repo.contoso.local", "packages.contoso.com"
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| extend Image = tolower(FileName), Cmd = tolower(ProcessCommandLine)
+| extend CertutilTransfer = Image == "certutil.exe"
+                            and (Cmd contains "-urlcache" or Cmd contains "-verifyctl" or Cmd contains "urlcache"),
+         BitsTransfer     = Image == "bitsadmin.exe" and (Cmd contains "/transfer" or Cmd contains "/addfile"),
+         CurlWgetTransfer = Image in~ ("curl.exe", "wget.exe")
+                            and (Cmd contains "http://" or Cmd contains "https://" or Cmd contains "ftp://"),
+         PowerShellTransfer = Image in~ ("powershell.exe", "pwsh.exe")
+                            and (Cmd contains "invoke-webrequest" or Cmd contains "iwr "
+                                 or Cmd contains "downloadfile" or Cmd contains "downloadstring"
+                                 or Cmd contains "start-bitstransfer" or Cmd contains "invoke-restmethod"),
+         ScriptHostTransfer = Image in~ ("mshta.exe", "cscript.exe", "wscript.exe")
+                            and (Cmd contains "http://" or Cmd contains "https://"),
+         RemoteCopy        = Image in~ ("scp.exe", "sftp.exe", "ssh.exe", "rsync.exe")
+                            and (Cmd contains "@" or Cmd contains ":/")
+| where CertutilTransfer or BitsTransfer or CurlWgetTransfer or PowerShellTransfer
+     or ScriptHostTransfer or RemoteCopy
+| where not(Cmd has_any (ApprovedDownloadSources))
+| extend ExternalRawIp   = Cmd matches regex @"(https?|ftp)://(\d{1,3}\.){3}\d{1,3}([:/]|$)",
+         NonStandardPort = Cmd matches regex @"https?://[^\s/]+:(?!80/|443/)\d{2,5}",
+         WritableOutput  = Cmd contains "\\appdata\\" or Cmd contains "\\users\\public\\"
+                           or Cmd contains "\\windows\\temp\\" or Cmd contains "\\downloads\\"
+                           or Cmd contains "\\programdata\\" or Cmd contains "\\temp\\",
+         PayloadExtension= Cmd contains ".exe" or Cmd contains ".dll" or Cmd contains ".ps1"
+                           or Cmd contains ".bat" or Cmd contains ".zip" or Cmd contains ".7z"
+                           or Cmd contains ".hta" or Cmd contains ".scr"
+| extend SignalCount = 1 + toint(ExternalRawIp) + toint(NonStandardPort)
+                     + toint(WritableOutput) + toint(PayloadExtension),
+         Tool = case(CertutilTransfer, "certutil", BitsTransfer, "bitsadmin",
+                     CurlWgetTransfer, "curl/wget", PowerShellTransfer, "powershell",
+                     ScriptHostTransfer, "script host", "remote copy")
+| project Timestamp, DeviceName, AccountDomain, AccountName, Tool, FileName, FolderPath, SHA256,
+          ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine,
+          SignalCount, ExternalRawIp, NonStandardPort, WritableOutput, PayloadExtension
+| order by SignalCount desc, Timestamp desc
+//
+// Confirm the transfer actually happened (join to the network and file events):
+// let Downloads = DeviceProcessEvents
+//     | where Timestamp > ago(Lookback)
+//     | where tolower(FileName) in~ ("certutil.exe", "bitsadmin.exe", "curl.exe");
+// Downloads
+// | join kind=leftouter (
+//     DeviceNetworkEvents | where Timestamp > ago(Lookback)
+//     | project DeviceId, NetTime = Timestamp, RemoteUrl, RemoteIP, RemotePort, InitiatingProcessId)
+//   on DeviceId
+// | where abs(datetime_diff('second', NetTime, Timestamp)) <= 30

@@ -1,0 +1,58 @@
+title: Obfuscated Command Line Structure
+id: 2bb7f015-43d0-4a15-8c15-7d6a1f150015
+status: experimental
+description: |
+  Detects command lines whose structure indicates deliberate obfuscation: an encoded-command switch
+  with a base64 payload, a long base64-like token, dense caret or backtick escaping, or character
+  and variable indirection. This is a hunt-grade heuristic - legitimate installers and deployment
+  tooling also produce ugly command lines - so tune the thresholds from your own distribution and
+  expect to review rather than alert.
+references:
+  - https://attack.mitre.org/techniques/T1027/010/
+  - https://attack.mitre.org/detectionstrategies/DET0505
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.stealth
+  - attack.t1027.010
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_interpreter:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cmd.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\mshta.exe'
+      - '\wmic.exe'
+  sig_encoded_switch:
+    CommandLine|re: '\s-{1,2}e(nc|ncodedcommand)?\s+[A-Za-z0-9+/=]{50,}'
+  sig_long_base64_token:
+    CommandLine|re: '[A-Za-z0-9+/]{100,}={0,2}'
+  sig_caret_escaping:
+    CommandLine|re: '(\^[a-zA-Z0-9]){5,}'
+  sig_backtick_escaping:
+    CommandLine|re: '(`[a-zA-Z0-9]){5,}'
+  sig_char_indirection:
+    CommandLine|contains:
+      - '[char]'
+      - '[convert]::'
+      - '-join'
+      - '${env:'
+      - 'FromBase64String'
+      - 'substring('
+  condition: selection_interpreter and 1 of sig_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Installers and deployment tooling passing long serialised or encoded arguments.
+  - Developer and build tooling.
+  - Administrators using encoding to avoid shell quoting problems.
+level: medium

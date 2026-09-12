@@ -1,0 +1,78 @@
+rule: TH-013-account-group-manipulation
+description: >
+  The French-locale case is the regression this rule exists for: the group name is "Admins du
+  domaine" and only the SID identifies it as Domain Admins. A name-based rule would miss it. The
+  negative cases cover a non-privileged group addition and a machine account creation.
+cases:
+  - name: Domain Admins addition on a French-locale domain controller
+    expect: match
+    target: 2bb7f013-43d0-4a13-8c13-7d6a1f130013
+    event:
+      EventID: 4728
+      Computer: 'DC01.contoso.local'
+      SubjectUserName: 'adm-jdoe'
+      MemberName: 'CN=svc-backup,OU=Services,DC=contoso,DC=local'
+      TargetUserName: 'Admins du domaine'
+      TargetSid: 'S-1-5-21-1111111111-2222222222-3333333333-512'
+
+  - name: Local Administrators addition on a member server
+    expect: match
+    target: 2bb7f013-43d0-4a13-8c13-7d6a1f130013
+    event:
+      EventID: 4732
+      Computer: 'SRV05.contoso.local'
+      SubjectUserName: 'SYSTEM'
+      MemberName: 'CONTOSO\svc-app'
+      TargetUserName: 'Administrators'
+      TargetSid: 'S-1-5-32-544'
+
+  - name: Backup Operators addition
+    expect: match
+    target: 2bb7f013-43d0-4a13-8c13-7d6a1f130013
+    event:
+      EventID: 4732
+      Computer: 'SRV06.contoso.local'
+      SubjectUserName: 'adm-kmartin'
+      MemberName: 'CONTOSO\temp-contractor'
+      TargetUserName: 'Sauvegarde'
+      TargetSid: 'S-1-5-32-551'
+
+  - name: Addition to an ordinary application group
+    expect: no_match
+    target: 2bb7f013-43d0-4a13-8c13-7d6a1f130013
+    event:
+      EventID: 4728
+      Computer: 'DC01.contoso.local'
+      SubjectUserName: 'svc-iam'
+      MemberName: 'CONTOSO\jdoe'
+      TargetUserName: 'App-CRM-Users'
+      TargetSid: 'S-1-5-21-1111111111-2222222222-3333333333-4821'
+
+  - name: Group addition event with a printer-operators-like RID that is not privileged
+    expect: no_match
+    target: 2bb7f013-43d0-4a13-8c13-7d6a1f130013
+    event:
+      EventID: 4728
+      Computer: 'DC01.contoso.local'
+      SubjectUserName: 'svc-iam'
+      MemberName: 'CONTOSO\jdoe'
+      TargetUserName: 'HelpDesk-Tier1'
+      TargetSid: 'S-1-5-21-1111111111-2222222222-3333333333-5120'
+
+  - name: User account created
+    expect: match
+    target: 2bb7f113-43d0-4b13-8d13-7d6a1f130113
+    event:
+      EventID: 4720
+      Computer: 'SRV05.contoso.local'
+      SubjectUserName: 'adm-jdoe'
+      TargetUserName: 'backupadmin2'
+
+  - name: Machine account created during domain join
+    expect: no_match
+    target: 2bb7f113-43d0-4b13-8d13-7d6a1f130113
+    event:
+      EventID: 4720
+      Computer: 'DC01.contoso.local'
+      SubjectUserName: 'svc-join'
+      TargetUserName: 'WKS-8890$'

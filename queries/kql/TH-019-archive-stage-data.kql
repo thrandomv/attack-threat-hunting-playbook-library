@@ -1,0 +1,56 @@
+// TH-019 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Find archive utility behaviour consistent with collection and staging.
+// Required data: DeviceProcessEvents. Add DeviceFileEvents for archive size and location.
+// ATT&CK: T1560.001, T1074.001 | Detection strategies DET0298 / AN0831, DET0261 / AN0724
+// Tunable: ArchiveTools (ArchiveCommands), SensitiveTerms (MonitoredDirectories),
+//          StagingPaths (StagingDirList), size threshold (FileSizeThresholdMB)
+let Lookback = 7d;
+let ArchiveTools = dynamic(["7z.exe", "7za.exe", "7zg.exe", "rar.exe", "winrar.exe", "unrar.exe",
+                            "tar.exe", "makecab.exe", "compact.exe", "zip.exe", "powershell.exe", "pwsh.exe"]);
+// Replace with your own sensitive share and directory names.
+let SensitiveTerms = dynamic(["\\users\\", "\\shares\\", "\\finance\\", "\\hr\\", "\\legal\\",
+                              "\\backup\\", "\\database\\", "\\payroll\\", ".pst", ".ost", ".edb",
+                              ".sql", ".bak", ".kdbx"]);
+let StagingPaths = dynamic(["\\windows\\temp\\", "\\users\\public\\", "\\programdata\\",
+                            "\\appdata\\local\\temp\\", "\\perflogs\\", "\\$recycle.bin\\"]);
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| where tolower(FileName) in~ (ArchiveTools)
+| extend Cmd = tolower(ProcessCommandLine)
+| where not(tolower(FileName) in~ ("powershell.exe", "pwsh.exe"))
+     or Cmd contains "compress-archive" or Cmd contains "zipfile" or Cmd contains "createfromdirectory"
+| extend PasswordOrEncrypt = Cmd matches regex @"(\s-p\S+|\s-hp\S+|--password|-mhe=on|securestring)",
+         SplitVolumes      = Cmd matches regex @"\s-v\d+[kmg]?\b" or Cmd contains "-volsize",
+         Recursive         = Cmd contains " -r " or Cmd contains " -r\"" or Cmd contains "--recursive"
+                             or Cmd contains "compress-archive" or Cmd contains " a ",
+         SensitiveSource   = Cmd has_any (SensitiveTerms),
+         StagingOutput     = Cmd has_any (StagingPaths),
+         RemoteSource      = Cmd contains "\\\\"
+| where PasswordOrEncrypt or SplitVolumes or StagingOutput or (Recursive and SensitiveSource) or RemoteSource
+| extend SignalCount = toint(PasswordOrEncrypt) + toint(SplitVolumes) + toint(Recursive)
+                     + toint(SensitiveSource) + toint(StagingOutput) + toint(RemoteSource),
+         Assessment = case(
+            PasswordOrEncrypt and StagingOutput, "Password-protected archive staged in a writable path",
+            SplitVolumes,                        "Split archive - sized for transfer limits",
+            PasswordOrEncrypt,                   "Password-protected archive",
+            SensitiveSource,                     "Archive of sensitive paths",
+                                                 "Archive staged in a writable path")
+| project Timestamp, DeviceName, AccountDomain, AccountName, Assessment, FileName, FolderPath, SHA256,
+          ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine,
+          InitiatingProcessAccountName, SignalCount, PasswordOrEncrypt, SplitVolumes, Recursive,
+          SensitiveSource, StagingOutput, RemoteSource
+| order by SignalCount desc, Timestamp desc
+//
+// Size companion - large archives written into staging directories (the strongest discriminator):
+// let MinSizeMb = 100;
+// DeviceFileEvents
+// | where Timestamp > ago(Lookback) and ActionType in ("FileCreated", "FileModified")
+// | where FileName endswith ".zip" or FileName endswith ".rar" or FileName endswith ".7z"
+//      or FileName endswith ".cab" or FileName endswith ".tar" or FileName endswith ".gz"
+//      or FileName matches regex @"\.(z|r)\d{2,3}$"     // split volumes
+// | where FolderPath has_any (StagingPaths)
+// | extend SizeMb = round(todouble(FileSize) / 1048576, 1)
+// | where SizeMb >= MinSizeMb
+// | project Timestamp, DeviceName, FolderPath, FileName, SizeMb, SHA256,
+//           InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName
+// | order by SizeMb desc

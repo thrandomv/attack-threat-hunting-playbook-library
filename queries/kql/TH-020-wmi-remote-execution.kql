@@ -1,0 +1,52 @@
+// TH-020 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Find suspicious processes spawned by the WMI provider host.
+// Required data: DeviceProcessEvents with parent image. Add WMI-Activity/Operational where possible.
+// ATT&CK: T1047 | Detection strategy DET0364 / AN1031
+// Tunable: SuspiciousChildren (SuspiciousCommandPatterns), ApprovedWmiAccounts (UserContext)
+let Lookback = 7d;
+let SuspiciousChildren = dynamic(["cmd.exe", "powershell.exe", "pwsh.exe", "rundll32.exe",
+                                  "regsvr32.exe", "mshta.exe", "wscript.exe", "cscript.exe",
+                                  "certutil.exe", "bitsadmin.exe", "curl.exe", "net.exe", "net1.exe",
+                                  "schtasks.exe", "sc.exe", "reg.exe", "vssadmin.exe", "wevtutil.exe"]);
+let ApprovedWmiAccounts = dynamic([]);   // e.g. "svc-sccm"; pair with the expected child image.
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| where tolower(InitiatingProcessFileName) in~ ("wmiprvse.exe", "scrcons.exe")
+| where tolower(AccountName) !in~ (ApprovedWmiAccounts)
+| where tolower(FileName) in~ (SuspiciousChildren)
+| extend Cmd = tolower(ProcessCommandLine)
+| extend Encoded     = Cmd contains "-enc" or Cmd contains "encodedcommand" or Cmd contains "frombase64string",
+         Transfer    = Cmd contains "http://" or Cmd contains "https://" or Cmd contains "downloadstring"
+                       or Cmd contains "invoke-webrequest" or Cmd contains "urlcache" or Cmd contains "bitsadmin",
+         Persistence = tolower(FileName) in~ ("schtasks.exe", "sc.exe", "reg.exe")
+                       or Cmd contains "new-service" or Cmd contains "register-wmievent"
+                       or Cmd contains "\\run\\" or Cmd contains "currentversion\\run",
+         Impairment  = tolower(FileName) in~ ("wevtutil.exe", "vssadmin.exe")
+                       or Cmd contains "mppreference" or Cmd contains "delete shadows",
+         WritablePath= Cmd contains "\\appdata\\" or Cmd contains "\\users\\public\\"
+                       or Cmd contains "\\windows\\temp\\" or Cmd contains "\\programdata\\",
+         Discovery   = tolower(FileName) in~ ("net.exe", "net1.exe") or Cmd contains "whoami"
+| extend SignalCount = 1 + toint(Encoded) + toint(Transfer) + toint(Persistence)
+                     + toint(Impairment) + toint(WritablePath) + toint(Discovery),
+         Assessment = case(
+            Impairment,  "Defence impairment through WMI - see TH-014 / TH-024",
+            Persistence, "Persistence created through WMI - see TH-011 / TH-012",
+            Encoded,     "Encoded payload executed through WMI",
+            Transfer,    "Tool transfer through WMI - see TH-016",
+                         "Interpreter or tooling executed through WMI")
+| project Timestamp, DeviceName, AccountDomain, AccountName, Assessment, FileName, FolderPath, SHA256,
+          ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine,
+          InitiatingProcessAccountName, SignalCount, Encoded, Transfer, Persistence, Impairment,
+          WritablePath, Discovery
+| order by SignalCount desc, Timestamp desc
+//
+// Second-order rule (AN1031 RemoteDestinationThreshold): one source issuing WMI to many hosts.
+// Requires the WMI-Activity/Operational log or network telemetry for DCOM.
+// DeviceNetworkEvents
+// | where Timestamp > ago(Lookback) and RemotePort == 135 and ActionType == "ConnectionSuccess"
+// | where InitiatingProcessFileName in~ ("wmic.exe", "powershell.exe", "pwsh.exe")
+// | summarize Destinations = dcount(RemoteIP), Hosts = make_set(RemoteIP, 30),
+//             FirstSeen = min(Timestamp), LastSeen = max(Timestamp)
+//             by DeviceName, InitiatingProcessAccountName, bin(Timestamp, 30m)
+// | where Destinations >= 3
+// | order by Destinations desc

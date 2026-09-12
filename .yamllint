@@ -1,0 +1,18 @@
+extends: default
+
+rules:
+  # Test fixtures hold realistic command lines and event rows on one line; wrapping them
+  # would hurt readability more than the length does.
+  line-length:
+    max: 220
+    level: warning
+  comments:
+    min-spaces-from-content: 1
+  document-start: disable
+  truthy:
+    check-keys: false
+  indentation:
+    spaces: 2
+    indent-sequences: consistent
+  empty-lines:
+    max: 2

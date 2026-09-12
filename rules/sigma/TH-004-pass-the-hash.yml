@@ -1,0 +1,84 @@
+title: NTLM Network Logon by a User Account
+name: th004_ntlm_network_logon
+id: 2bb7f004-43d0-4a04-8c04-7d6a1f040004
+status: experimental
+description: |
+  Base event for the Pass-the-Hash correlation: an NTLM network logon (LogonType 3) or an explicit
+  NewCredentials logon (LogonType 9) by a user account. Individually routine - machine accounts,
+  anonymous logons and Kerberos logons are excluded so the correlation counts only what can carry
+  reused hash material.
+references:
+  - https://attack.mitre.org/techniques/T1550/002/
+  - https://attack.mitre.org/detectionstrategies/DET0409
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.lateral-movement
+  - attack.t1550.002
+logsource:
+  product: windows
+  service: security
+detection:
+  selection_logon:
+    EventID: 4624
+    LogonType:
+      - 3
+      - 9
+    AuthenticationPackageName: 'NTLM'
+  filter_machine_account:
+    TargetUserName|endswith: '$'
+  filter_service_identities:
+    TargetUserName:
+      - 'ANONYMOUS LOGON'
+      - 'SYSTEM'
+      - 'LOCAL SERVICE'
+      - 'NETWORK SERVICE'
+  filter_local_source:
+    IpAddress:
+      - '-'
+      - '127.0.0.1'
+      - '::1'
+  condition: selection_logon and not 1 of filter_*
+fields:
+  - TargetUserName
+  - IpAddress
+  - LogonType
+  - WorkstationName
+  - Computer
+falsepositives:
+  - Legacy applications that cannot negotiate Kerberos.
+  - Connections made to an IP literal rather than a hostname, which force NTLM.
+level: informational
+---
+title: Pass the Hash - NTLM Logon Fan-Out From a Single Source
+id: 2bb7f104-43d0-4b04-8d04-7d6a1f040104
+status: experimental
+description: |
+  Correlates NTLM network logons by one account from one source address reaching at least three
+  distinct destination systems within thirty minutes. Tune the threshold from your own admin
+  workflow baseline before deployment; management servers and scanners legitimately fan out.
+references:
+  - https://attack.mitre.org/techniques/T1550/002/
+  - https://attack.mitre.org/detectionstrategies/DET0409
+author: Hamza Khella
+date: 2026-09-10
+modified: 2026-09-10
+tags:
+  - attack.lateral-movement
+  - attack.t1550.002
+correlation:
+  type: value_count
+  rules:
+    - th004_ntlm_network_logon
+  group-by:
+    - TargetUserName
+    - IpAddress
+  timespan: 30m
+  condition:
+    field: Computer
+    gte: 3
+falsepositives:
+  - Vulnerability scanners, patch management and inventory agents.
+  - Administrative scripting that touches several servers in sequence.
+level: high

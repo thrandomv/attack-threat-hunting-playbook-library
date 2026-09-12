@@ -1,0 +1,75 @@
+rule: TH-022-ntlm-coercion-relay
+description: >
+  Pipe-access cases separate coercion pipes from ordinary SMB pipes such as srvsvc, which would
+  otherwise flood the rule. Tooling cases cover the endpoint half.
+cases:
+  - name: efsrpc pipe access from an unapproved source
+    expect: match
+    target: 2bb7f022-43d0-4a22-8c22-7d6a1f220022
+    event:
+      EventID: 5145
+      Computer: 'DC01.contoso.local'
+      ShareName: '\\*\IPC$'
+      RelativeTargetName: 'efsrpc'
+      IpAddress: '10.20.30.99'
+      SubjectUserName: 'ANONYMOUS LOGON'
+
+  - name: spoolss pipe access (PrinterBug)
+    expect: match
+    target: 2bb7f022-43d0-4a22-8c22-7d6a1f220022
+    event:
+      EventID: 5145
+      Computer: 'DC02.contoso.local'
+      ShareName: '\\*\IPC$'
+      RelativeTargetName: 'spoolss'
+      IpAddress: '10.20.30.99'
+      SubjectUserName: 'CONTOSO\jdoe'
+
+  - name: Ordinary srvsvc pipe access
+    expect: no_match
+    target: 2bb7f022-43d0-4a22-8c22-7d6a1f220022
+    event:
+      EventID: 5145
+      Computer: 'FS01.contoso.local'
+      ShareName: '\\*\IPC$'
+      RelativeTargetName: 'srvsvc'
+      IpAddress: '10.20.30.40'
+      SubjectUserName: 'CONTOSO\jdoe'
+
+  - name: File share access rather than a named pipe
+    expect: no_match
+    target: 2bb7f022-43d0-4a22-8c22-7d6a1f220022
+    event:
+      EventID: 5145
+      Computer: 'FS01.contoso.local'
+      ShareName: '\\*\Finance'
+      RelativeTargetName: 'budget.xlsx'
+      IpAddress: '10.20.30.40'
+      SubjectUserName: 'CONTOSO\jdoe'
+
+  - name: ntlmrelayx execution
+    expect: match
+    target: 2bb7f122-43d0-4b22-8d22-7d6a1f220122
+    event:
+      Image: 'C:\Users\Public\python.exe'
+      CommandLine: 'python.exe ntlmrelayx.py -t ldaps://dc01.contoso.local --escalate-user jdoe'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Inveigh poisoning module
+    expect: match
+    target: 2bb7f122-43d0-4b22-8d22-7d6a1f220122
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe Invoke-Inveigh -ConsoleOutput Y -LLMNR Y -NBNS Y'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Ordinary python script execution
+    expect: no_match
+    target: 2bb7f122-43d0-4b22-8d22-7d6a1f220122
+    event:
+      Image: 'C:\Python312\python.exe'
+      CommandLine: 'python.exe report.py --daily'
+      ParentImage: 'C:\Windows\System32\taskeng.exe'
+      User: 'CONTOSO\svc-reporting'

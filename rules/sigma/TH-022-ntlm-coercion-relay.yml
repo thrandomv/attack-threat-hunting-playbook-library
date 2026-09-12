@@ -1,0 +1,94 @@
+title: Authentication Coercion via RPC Named Pipe Access
+id: 2bb7f022-43d0-4a22-8c22-7d6a1f220022
+status: experimental
+description: |
+  Detects access to the named pipes used by authentication-coercion techniques (PetitPotam via
+  efsrpc, PrinterBug via spoolss, DFSCoerce via netdfs, and lsarpc/samr variants) through Security
+  5145. These pipes are also used legitimately, so the discriminator is the source: filter to your
+  domain controllers, print servers and management hosts, then treat everything else as coercion.
+  Requires Audit Detailed File Share to be enabled.
+references:
+  - https://attack.mitre.org/techniques/T1187/
+  - https://attack.mitre.org/detectionstrategies/DET0022
+author: Hamza Khella
+date: 2026-09-10
+modified: 2026-09-10
+tags:
+  - attack.credential-access
+  - attack.t1187
+  - attack.t1557.001
+logsource:
+  product: windows
+  service: security
+detection:
+  selection_pipe_access:
+    EventID: 5145
+    ShareName|contains: 'IPC$'
+    RelativeTargetName:
+      - 'efsrpc'
+      - 'efsr'
+      - 'lsarpc'
+      - 'netdfs'
+      - 'spoolss'
+      - 'fssagentrpc'
+  filter_known_infrastructure:
+    IpAddress:
+      - '10.10.0.5'
+      - '10.10.0.6'
+  condition: selection_pipe_access and not filter_known_infrastructure
+fields:
+  - SubjectUserName
+  - IpAddress
+  - RelativeTargetName
+  - Computer
+falsepositives:
+  - Legitimate EFS, DFS and print-spooler operations from infrastructure servers.
+  - Backup and management platforms enumerating shares and services.
+level: high
+---
+title: NTLM Relay and Name-Resolution Poisoning Tooling
+id: 2bb7f122-43d0-4b22-8d22-7d6a1f220122
+status: experimental
+description: |
+  Detects execution of tooling used to poison name resolution or relay captured NTLM authentication -
+  Responder, Inveigh, ntlmrelayx, PetitPotam, Coercer, PrinterBug and SpoolSample. Renaming defeats
+  name matching, so keep the 5145 rule above as primary coverage.
+references:
+  - https://attack.mitre.org/techniques/T1557/001/
+  - https://attack.mitre.org/detectionstrategies/DET0462
+author: Hamza Khella
+date: 2026-09-10
+modified: 2026-09-10
+tags:
+  - attack.credential-access
+  - attack.collection
+  - attack.t1557.001
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_tool_reference:
+    CommandLine|contains:
+      - 'Responder.py'
+      - 'Invoke-Inveigh'
+      - 'ntlmrelayx'
+      - 'PetitPotam'
+      - 'Coercer'
+      - 'DFSCoerce'
+      - 'SpoolSample'
+      - 'printerbug'
+  selection_tool_image:
+    Image|endswith:
+      - '\Inveigh.exe'
+      - '\ntlmrelayx.exe'
+      - '\PetitPotam.exe'
+  condition: 1 of selection_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Authorised penetration testing and purple-team exercises.
+  - Security engineers validating relay hardening in a change window.
+level: critical

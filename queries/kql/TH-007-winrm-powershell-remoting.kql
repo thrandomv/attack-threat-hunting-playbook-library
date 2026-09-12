@@ -1,0 +1,43 @@
+// TH-007 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Find suspicious children of the WinRM / PowerShell remoting host processes.
+// Required data: DeviceProcessEvents with parent process fields.
+// ATT&CK: T1021.006 | Detection strategy DET0477 / AN1313
+// Tunable: SuspiciousChildren + MinSignalCount (CommandLineAnomalyScore), ApprovedRemotingAccounts (UserContext)
+let Lookback = 7d;
+let MinSignalCount = 1;
+let RemotingHosts = dynamic(["wsmprovhost.exe", "winrshost.exe"]);
+let SuspiciousChildren = dynamic(["cmd.exe", "powershell.exe", "pwsh.exe", "rundll32.exe",
+                                  "regsvr32.exe", "certutil.exe", "bitsadmin.exe", "curl.exe",
+                                  "mshta.exe", "cscript.exe", "wscript.exe", "net.exe", "sc.exe"]);
+let ApprovedRemotingAccounts = dynamic([]);   // e.g. "svc-ansible", "svc-dsc"
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| where tolower(InitiatingProcessFileName) in~ (RemotingHosts)
+| where tolower(AccountName) !in~ (ApprovedRemotingAccounts)
+| extend Cmd = tolower(ProcessCommandLine)
+| extend SuspiciousChild = tolower(FileName) in~ (SuspiciousChildren),
+         Encoded    = Cmd contains "-enc" or Cmd contains "-e " or Cmd contains "encodedcommand"
+                      or Cmd contains "frombase64string",
+         Transfer   = Cmd contains "http://" or Cmd contains "https://" or Cmd contains "downloadstring"
+                      or Cmd contains "downloadfile" or Cmd contains "invoke-webrequest"
+                      or Cmd contains "start-bitstransfer" or Cmd contains "urlcache",
+         InMemory   = Cmd contains "iex" or Cmd contains "invoke-expression"
+                      or Cmd contains "reflection.assembly" or Cmd contains "[char]",
+         DefenceChange = Cmd contains "mppreference" or Cmd contains "amsi"
+                      or Cmd contains "wevtutil" or Cmd contains "auditpol",
+         WritablePath = Cmd contains "\\users\\public\\" or Cmd contains "\\appdata\\"
+                      or Cmd contains "\\windows\\temp\\" or Cmd contains "\\programdata\\"
+| extend SignalCount = toint(SuspiciousChild) + toint(Encoded) + toint(Transfer)
+                     + toint(InMemory) + toint(DefenceChange) + toint(WritablePath)
+| where SignalCount >= MinSignalCount
+| project Timestamp, DeviceName, AccountDomain, AccountName, FileName, FolderPath, SHA256,
+          ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine,
+          InitiatingProcessAccountName, SignalCount, SuspiciousChild, Encoded, Transfer,
+          InMemory, DefenceChange, WritablePath
+| order by SignalCount desc, Timestamp desc
+//
+// Baseline first (how much legitimate remoting exists, and from whom):
+// DeviceProcessEvents
+// | where Timestamp > ago(30d) and tolower(InitiatingProcessFileName) in~ (RemotingHosts)
+// | summarize Executions = count(), Hosts = dcount(DeviceName) by AccountName, FileName
+// | order by Executions desc

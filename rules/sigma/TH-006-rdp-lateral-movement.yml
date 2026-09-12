@@ -1,0 +1,72 @@
+title: Interactive RDP Logon by a User Account
+name: th006_rdp_interactive_logon
+id: 2bb7f006-43d0-4a06-8c06-7d6a1f060006
+status: experimental
+description: |
+  Base event for the RDP fan-out correlation: a RemoteInteractive logon (LogonType 10) by a user
+  account from a remote address. Routine on its own in any estate that administers over RDP.
+references:
+  - https://attack.mitre.org/techniques/T1021/001/
+  - https://attack.mitre.org/detectionstrategies/DET0327
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.lateral-movement
+  - attack.t1021.001
+logsource:
+  product: windows
+  service: security
+detection:
+  selection_rdp:
+    EventID: 4624
+    LogonType: 10
+  filter_machine_account:
+    TargetUserName|endswith: '$'
+  filter_local:
+    IpAddress:
+      - '-'
+      - '127.0.0.1'
+      - '::1'
+  condition: selection_rdp and not 1 of filter_*
+fields:
+  - TargetUserName
+  - IpAddress
+  - Computer
+  - LogonType
+falsepositives:
+  - Administrators and helpdesk staff working from jump hosts.
+  - Session brokers and remote support platforms.
+level: informational
+---
+title: RDP Session Fan-Out From a Single Source
+id: 2bb7f106-43d0-4b06-8d06-7d6a1f060106
+status: experimental
+description: |
+  Correlates RemoteInteractive logons by one account from one source address reaching at least three
+  distinct destinations within thirty minutes. In estates with a jump-host architecture, invert the
+  tuning: allowlist the jump hosts and treat any other RDP origin as the alert.
+references:
+  - https://attack.mitre.org/techniques/T1021/001/
+  - https://attack.mitre.org/detectionstrategies/DET0327
+author: Hamza Khella
+date: 2026-09-10
+modified: 2026-09-10
+tags:
+  - attack.lateral-movement
+  - attack.t1021.001
+correlation:
+  type: value_count
+  rules:
+    - th006_rdp_interactive_logon
+  group-by:
+    - TargetUserName
+    - IpAddress
+  timespan: 30m
+  condition:
+    field: Computer
+    gte: 3
+falsepositives:
+  - Helpdesk staff working through a queue of workstations.
+  - Patch or maintenance windows with scripted interactive sessions.
+level: medium

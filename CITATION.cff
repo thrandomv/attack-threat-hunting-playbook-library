@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: If this defensive content helped your work, cite the repository release.
+title: ATT&CK Threat Hunting Playbook Library
+version: 2.0.0
+date-released: 2026-09-10
+authors:
+  - family-names: Khella
+    given-names: Hamza
+    alias: thrandomv
+license: MIT
+type: software
+repository-code: https://github.com/thrandomv/attack-threat-hunting-playbook-library
+keywords:
+  - threat-hunting
+  - detection-engineering
+  - mitre-attack
+  - sigma
+  - kql
+  - microsoft-sentinel
+  - defender-xdr
+  - purple-team
+abstract: >-
+  A library of 25 ATT&CK v19.2-aligned threat-hunting playbooks with Microsoft KQL hunts and portable
+  Sigma detection and correlation rules. Every Sigma rule ships with synthetic true-positive and
+  false-positive unit tests executed by an included Sigma evaluation engine; ATT&CK
+  technique, detection-strategy and Atomic Red Team references are validated against pinned snapshots
+  of the upstream sources.

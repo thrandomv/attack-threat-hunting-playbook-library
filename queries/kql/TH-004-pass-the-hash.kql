@@ -1,0 +1,41 @@
+// TH-004 | Surface: Microsoft Sentinel / Log Analytics
+// Purpose: Surface NTLM logon fan-out consistent with credential reuse / Pass the Hash.
+// Required data: SecurityEvent 4624 from destination systems (not DCs alone).
+// ATT&CK: T1550.002 | Detection strategy DET0409 / AN1144
+// Tunable: Window (TimeWindow), MinDistinctTargets (SourceAccountAnomalyThreshold), LogonTypes (LogonTypeFilter)
+let Lookback = 7d;
+let Window = 30m;
+let MinDistinctTargets = 3;
+let LogonTypes = dynamic([3, 9]);          // 3 = network, 9 = NewCredentials (runas /netonly)
+let ApprovedSources = dynamic(["192.0.2.10"]);   // RFC 5737 placeholder: scanners, management servers.
+let ApprovedAccounts = dynamic([]);              // Pair with ApprovedSources; never allowlist an account alone.
+SecurityEvent
+| where TimeGenerated > ago(Lookback) and EventID == 4624
+| extend LogonTypeValue = toint(column_ifexists("LogonType", -1)),
+         SourceIp   = tostring(column_ifexists("IpAddress", column_ifexists("ClientAddress", ""))),
+         TargetUser = tostring(column_ifexists("TargetUserName", "")),
+         TargetDomain = tostring(column_ifexists("TargetDomainName", "")),
+         AuthPackage = tostring(column_ifexists("AuthenticationPackageName", "")),
+         LogonProcess = tostring(column_ifexists("LogonProcessName", "")),
+         Workstation = tostring(column_ifexists("WorkstationName", "")),
+         LogonId = tostring(column_ifexists("TargetLogonId", ""))
+| where LogonTypeValue in (LogonTypes)
+| where AuthPackage has "NTLM" or LogonProcess has "NtLmSsp"
+| where TargetUser !endswith "$"                       // machine accounts authenticate over NTLM constantly
+| where TargetUser !in~ ("ANONYMOUS LOGON", "SYSTEM", "LOCAL SERVICE", "NETWORK SERVICE")
+| extend SourceIp = iff(SourceIp startswith "::ffff:", substring(SourceIp, 7), SourceIp)
+| where SourceIp !in ("", "-", "127.0.0.1", "::1") and SourceIp !in (ApprovedSources)
+| where TargetUser !in~ (ApprovedAccounts)
+| summarize Logons = count(), DistinctTargets = dcount(Computer),
+            Targets = make_set(Computer, 40), LogonTypesSeen = make_set(LogonTypeValue, 5),
+            Workstations = make_set(Workstation, 10), LogonIds = make_set(LogonId, 20),
+            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+            by TargetUser, TargetDomain, SourceIp, AuthPackage, bin(TimeGenerated, Window)
+| where DistinctTargets >= MinDistinctTargets
+| extend SpreadSeconds = datetime_diff('second', LastSeen, FirstSeen),
+         TargetsPerMinute = round(todouble(DistinctTargets) /
+                                  max_of(1.0, datetime_diff('second', LastSeen, FirstSeen) / 60.0), 2)
+| project TimeWindow = TimeGenerated, FirstSeen, LastSeen, SpreadSeconds, TargetUser, TargetDomain,
+          SourceIp, Logons, DistinctTargets, TargetsPerMinute, LogonTypesSeen, Targets,
+          Workstations, AuthPackage
+| order by DistinctTargets desc, TargetsPerMinute desc

@@ -1,0 +1,63 @@
+rule: TH-023-entra-oauth-consent-abuse
+description: >
+  Consent cases separate sensitive Graph scopes from the User.Read consent that every sign-in flow
+  produces. Credential cases cover the quieter persistence path and must not fire on ordinary user
+  management events.
+cases:
+  - name: Consent granted with mailbox read and write scopes
+    expect: match
+    target: 2bb7f023-43d0-4a23-8c23-7d6a1f230023
+    event:
+      OperationName: 'Consent to application'
+      Category: 'ApplicationManagement'
+      InitiatedBy: 'jdoe@contoso.com'
+      TargetResources: 'Contoso Mail Helper'
+      Properties: 'ConsentAction.Permissions: Mail.ReadWrite, offline_access, User.Read'
+
+  - name: App role assignment with directory write
+    expect: match
+    target: 2bb7f023-43d0-4a23-8c23-7d6a1f230023
+    event:
+      OperationName: 'Add app role assignment to service principal'
+      Category: 'ApplicationManagement'
+      InitiatedBy: 'admin@contoso.com'
+      TargetResources: 'Reporting Connector'
+      Properties: 'AppRole.Value: Directory.ReadWrite.All'
+
+  - name: Consent limited to User.Read
+    expect: no_match
+    target: 2bb7f023-43d0-4a23-8c23-7d6a1f230023
+    event:
+      OperationName: 'Consent to application'
+      Category: 'ApplicationManagement'
+      InitiatedBy: 'jdoe@contoso.com'
+      TargetResources: 'Contoso Intranet'
+      Properties: 'ConsentAction.Permissions: User.Read, openid, profile'
+
+  - name: Unrelated directory audit event
+    expect: no_match
+    target: 2bb7f023-43d0-4a23-8c23-7d6a1f230023
+    event:
+      OperationName: 'Update user'
+      Category: 'UserManagement'
+      InitiatedBy: 'admin@contoso.com'
+      TargetResources: 'jdoe@contoso.com'
+      Properties: 'Included Updated Properties: DisplayName'
+
+  - name: Secret added to a service principal
+    expect: match
+    target: 2bb7f123-43d0-4b23-8d23-7d6a1f230123
+    event:
+      OperationName: 'Add service principal credentials'
+      Category: 'ApplicationManagement'
+      InitiatedBy: 'jdoe@contoso.com'
+      TargetResources: 'Contoso Reporting App'
+
+  - name: Ordinary group membership change
+    expect: no_match
+    target: 2bb7f123-43d0-4b23-8d23-7d6a1f230123
+    event:
+      OperationName: 'Add member to group'
+      Category: 'GroupManagement'
+      InitiatedBy: 'admin@contoso.com'
+      TargetResources: 'Sales Team'

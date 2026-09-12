@@ -1,0 +1,52 @@
+rule: TH-012-windows-service-creation
+description: >
+  Positives cover the interpreter binary path, remote creation, and reconfiguration of a security
+  service. Negatives cover service enumeration and a signed installer creating a normal service.
+cases:
+  - name: Service created with a cmd.exe binary path
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\sc.exe'
+      CommandLine: 'sc.exe create UpdaterSvc binPath= "cmd.exe /c C:\Windows\Temp\p.bat" start= auto'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Remote service creation
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\sc.exe'
+      CommandLine: 'sc.exe \\SRV02 create Backdoor binPath= "C:\Users\Public\svc.exe" start= auto'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Defender service reconfigured to disabled
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\sc.exe'
+      CommandLine: 'sc.exe config WinDefend start= disabled'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Service created through the PowerShell cmdlet from a public path
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe New-Service -Name Sync -BinaryPathName C:\Users\Public\sync.exe'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Service enumeration
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\sc.exe'
+      CommandLine: 'sc.exe query WinDefend'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Installer creating a normal service in Program Files
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\sc.exe'
+      CommandLine: 'sc.exe create ContosoAgent binPath= "C:\Program Files\Contoso\Agent\agentsvc.exe" start= auto'
+      ParentImage: 'C:\Windows\System32\msiexec.exe'
+      User: 'NT AUTHORITY\SYSTEM'

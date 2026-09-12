@@ -1,0 +1,68 @@
+name: Documentation site
+
+# Manual trigger only. GitHub Pages must be enabled first
+# (Settings -> Pages -> Source: GitHub Actions) or the deploy step has nothing
+# to publish to and the run fails. Once Pages is enabled, run this workflow
+# from the Actions tab; add a push trigger below if you want it automatic:
+#
+#   push:
+#     branches: [main]
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build MkDocs site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          # requirements-dev.txt does not match setup-python's default
+          # globs (**/requirements.txt, **/pyproject.toml); without this the
+          # step fails before any validation runs.
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install PyYAML mkdocs mkdocs-material
+
+      # site-src mirrors the repository layout so every relative link works unchanged.
+      - name: Assemble site source
+        run: |
+          python3 scripts/build.py --check
+          rm -rf site-src && mkdir -p site-src
+          cp README.md site-src/index.md
+          cp CHANGELOG.md CONTRIBUTING.md SECURITY.md DISCLAIMER.md NOTICE.md CODE_OF_CONDUCT.md site-src/
+          cp -r docs playbooks mappings validation queries rules tests scripts templates site-src/
+          cp LICENSE site-src/LICENSE.md
+
+      - name: Build site
+        run: mkdocs build
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

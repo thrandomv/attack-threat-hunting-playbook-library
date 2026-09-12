@@ -1,0 +1,45 @@
+// TH-005 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Find PsExec-style service execution and anomalous children of services.exe.
+// Required data: DeviceProcessEvents. Pair with System 7045 / Security 4697 on the destination.
+// ATT&CK: T1021.002, T1569.002 | Detection strategies DET0530 / AN1468, DET0421 / AN1185
+// Tunable: KnownServiceImages (ServiceBinaryAllowlist), SuspiciousRoots (ImagePathFilter)
+let Lookback = 7d;
+let KnownServiceImages = dynamic(["psexesvc.exe", "psexesvc64.exe", "paexec.exe", "remcomsvc.exe",
+                                  "csexecsvc.exe", "smbexec.exe"]);
+let Interpreters = dynamic(["cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe",
+                            "mshta.exe", "rundll32.exe", "regsvr32.exe"]);
+let SuspiciousRoots = dynamic(["\\windows\\temp\\", "\\users\\public\\", "\\programdata\\",
+                               "\\appdata\\", "\\perflogs\\", "\\$recycle.bin\\"]);
+let ApprovedDeploymentParents = dynamic([]);   // e.g. "c:\\windows\\ccm\\ccmexec.exe"
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| extend LowerPath = tolower(FolderPath), LowerCmd = tolower(ProcessCommandLine),
+         LowerImage = tolower(FileName), LowerParent = tolower(InitiatingProcessFileName),
+         OriginalName = tolower(coalesce(column_ifexists("ProcessVersionInfoOriginalFileName", ""), FileName))
+| extend KnownTool      = LowerImage in~ (KnownServiceImages) or OriginalName in~ (KnownServiceImages),
+         ServiceChild   = LowerParent == "services.exe"
+| extend InterpreterChild = ServiceChild and LowerImage in~ (Interpreters),
+         WritablePath     = ServiceChild and LowerPath has_any (SuspiciousRoots),
+         UncReference     = ServiceChild and (LowerCmd contains "\\\\" or LowerPath startswith "\\\\"),
+         PipeArtifact     = LowerCmd contains "\\pipe\\" or LowerCmd contains "%comspec%"
+| where KnownTool or InterpreterChild or WritablePath or UncReference
+| where not(tolower(InitiatingProcessFolderPath) in~ (ApprovedDeploymentParents))
+| extend Reason = case(
+    KnownTool,          "Known PsExec-family service image",
+    WritablePath,       "Service binary in a user-writable path",
+    UncReference,       "Service child references a UNC path",
+    InterpreterChild,   "services.exe spawned a command interpreter",
+                        "Service child requires review"),
+    SignalCount = toint(KnownTool) + toint(InterpreterChild) + toint(WritablePath)
+                + toint(UncReference) + toint(PipeArtifact)
+| project Timestamp, DeviceName, AccountDomain, AccountName, FileName, OriginalName, FolderPath,
+          SHA256, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessFolderPath,
+          InitiatingProcessCommandLine, InitiatingProcessAccountName, Reason, SignalCount,
+          KnownTool, InterpreterChild, WritablePath, UncReference, PipeArtifact
+| order by SignalCount desc, Timestamp desc
+//
+// Pair with service installation on the same host and minute:
+// DeviceEvents
+// | where Timestamp > ago(Lookback) and ActionType == "ServiceInstalled"
+// | project Timestamp, DeviceName, AdditionalFields
+// Sentinel equivalent: Event | where EventID == 7045 (System log) or SecurityEvent | where EventID == 4697

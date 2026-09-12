@@ -1,0 +1,62 @@
+// TH-001 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Find process-creation evidence consistent with LSASS memory dumping.
+// Required data: DeviceProcessEvents. Pair with the Sysmon Event ID 10 companion below.
+// ATT&CK: T1003.001 | Detection strategy DET0363 / AN1030
+// Tunable: Lookback (TimeWindow), ApprovedDumpTools (ProcessNameExclusions), DumpFilePattern (DumpFilePath)
+let Lookback = 7d;
+let ApprovedDumpTools = dynamic([]);            // e.g. "vendorcrashagent.exe" - add only with signer + path proof.
+let ApprovedInitiators = dynamic([]);           // Parent images allowed to invoke the tools above.
+let DumperImages = dynamic(["procdump.exe", "procdump64.exe", "createdump.exe", "sqldumper.exe",
+                            "dumpert.exe", "nanodump.exe", "outflank-dumpert.exe"]);
+let CredentialStrings = dynamic(["sekurlsa", "logonpasswords", "lsadump", "nanodump", "dumpert", "mimikatz"]);
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| extend Cmd = tolower(ProcessCommandLine)
+| extend Image = tolower(FileName)
+// Fall back to FileName when the sensor does not populate the PE original file name.
+| extend OriginalName = tolower(coalesce(column_ifexists("ProcessVersionInfoOriginalFileName", ""), FileName))
+| where Image in~ (DumperImages) or OriginalName in~ (DumperImages)
+    or Cmd contains "lsass" or Cmd has_any (CredentialStrings)
+| extend LsassReference   = Cmd contains "lsass",
+         ComsvcsDump      = (Image == "rundll32.exe" or OriginalName == "rundll32.exe")
+                            and Cmd contains "comsvcs" and Cmd contains "minidump",
+         DumpSemantics    = Cmd contains "-ma" or Cmd contains "-mm" or Cmd contains "minidump"
+                            or Cmd contains ".dmp" or Cmd contains "createdump" or Cmd contains "-accepteula",
+         CredentialTooling= Cmd has_any (CredentialStrings),
+         RenamedTool      = OriginalName in~ (DumperImages) and Image !in~ (DumperImages)
+| extend SignalCount = toint(LsassReference) + toint(ComsvcsDump) + toint(DumpSemantics)
+                     + toint(CredentialTooling) + toint(RenamedTool)
+// Promote comsvcs MiniDump and credential tooling on their own; otherwise require corroboration.
+| where ComsvcsDump or CredentialTooling or (LsassReference and DumpSemantics)
+| where not(Image in~ (ApprovedDumpTools) and tolower(InitiatingProcessFileName) in~ (ApprovedInitiators))
+| project Timestamp, DeviceName, AccountDomain, AccountName, FileName, OriginalName, FolderPath,
+          ProcessCommandLine, ProcessId, SHA256, InitiatingProcessFileName,
+          InitiatingProcessFolderPath, InitiatingProcessCommandLine, InitiatingProcessAccountName,
+          SignalCount, LsassReference, ComsvcsDump, DumpSemantics, CredentialTooling, RenamedTool
+| order by SignalCount desc, Timestamp desc
+//
+// ---------------------------------------------------------------------------
+// Companion (Microsoft Sentinel + Sysmon Event ID 10): handle access to LSASS.
+// This is the higher-fidelity half of the technique and catches tooling that
+// leaves no command-line evidence (Task Manager, direct syscalls, renamed binaries).
+// Requires a Sysmon config that does NOT exclude the dumping tools you care about,
+// and an Event table populated by the Windows Security Events / Sysmon connector.
+// Verify the table name in your workspace before scheduling.
+// ---------------------------------------------------------------------------
+// let DumpMasks = dynamic(["0x1010", "0x1410", "0x1438", "0x143a", "0x1f0fff", "0x1fffff"]);
+// let KnownAccessors = dynamic(["c:\\windows\\system32\\wbem\\wmiprvse.exe",
+//                               "c:\\windows\\system32\\svchost.exe",
+//                               "c:\\program files\\windows defender\\msmpeng.exe"]);
+// Event
+// | where TimeGenerated > ago(Lookback)
+// | where Source == "Microsoft-Windows-Sysmon" and EventID == 10
+// | extend Parsed = parse_xml(EventData)
+// | mv-expand Field = Parsed.DataItem.EventData.Data
+// | extend Key = tostring(Field["@Name"]), Value = tostring(Field["#text"])
+// | evaluate pivot(Key, any(Value), TimeGenerated, Computer)
+// | where tolower(TargetImage) endswith "\\lsass.exe"
+// | extend Mask = tolower(GrantedAccess), Source = tolower(SourceImage)
+// | where Mask in (DumpMasks) or Mask endswith "0fff"
+// | where Source !in (KnownAccessors)
+// | project TimeGenerated, Computer, SourceImage, SourceProcessId, TargetImage, GrantedAccess, CallTrace
+// | order by TimeGenerated desc

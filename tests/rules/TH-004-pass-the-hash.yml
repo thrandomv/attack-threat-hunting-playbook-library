@@ -1,0 +1,65 @@
+rule: TH-004-pass-the-hash
+description: >
+  Base-rule cases prove machine accounts, anonymous logons and Kerberos are excluded. Correlation
+  cases prove destination breadth is what fires, not logon volume against a single host.
+cases:
+  - name: NTLM network logon by a user account
+    expect: match
+    target: th004_ntlm_network_logon
+    event:
+      EventID: 4624
+      LogonType: 3
+      AuthenticationPackageName: 'NTLM'
+      TargetUserName: 'svc-backup'
+      IpAddress: '10.10.10.55'
+      Computer: 'FS01.contoso.local'
+
+  - name: Machine account NTLM logon
+    expect: no_match
+    target: th004_ntlm_network_logon
+    event:
+      EventID: 4624
+      LogonType: 3
+      AuthenticationPackageName: 'NTLM'
+      TargetUserName: 'WKS-1234$'
+      IpAddress: '10.10.10.55'
+      Computer: 'FS01.contoso.local'
+
+  - name: Anonymous logon
+    expect: no_match
+    target: th004_ntlm_network_logon
+    event:
+      EventID: 4624
+      LogonType: 3
+      AuthenticationPackageName: 'NTLM'
+      TargetUserName: 'ANONYMOUS LOGON'
+      IpAddress: '10.10.10.55'
+      Computer: 'FS01.contoso.local'
+
+  - name: Kerberos network logon
+    expect: no_match
+    target: th004_ntlm_network_logon
+    event:
+      EventID: 4624
+      LogonType: 3
+      AuthenticationPackageName: 'Kerberos'
+      TargetUserName: 'jdoe'
+      IpAddress: '10.10.10.55'
+      Computer: 'FS01.contoso.local'
+
+  - name: One account reaching three servers in eight minutes
+    expect: match
+    target: 2bb7f104-43d0-4b04-8d04-7d6a1f040104
+    events:
+      - {timestamp: '2026-09-02T14:00:00Z', EventID: 4624, LogonType: 3, AuthenticationPackageName: 'NTLM', TargetUserName: 'svc-backup', IpAddress: '10.10.10.55', Computer: 'FS01'}
+      - {timestamp: '2026-09-02T14:03:00Z', EventID: 4624, LogonType: 3, AuthenticationPackageName: 'NTLM', TargetUserName: 'svc-backup', IpAddress: '10.10.10.55', Computer: 'FS02'}
+      - {timestamp: '2026-09-02T14:08:00Z', EventID: 4624, LogonType: 9, AuthenticationPackageName: 'NTLM', TargetUserName: 'svc-backup', IpAddress: '10.10.10.55', Computer: 'SQL01'}
+
+  - name: Repeated logons to a single destination
+    expect: no_match
+    target: 2bb7f104-43d0-4b04-8d04-7d6a1f040104
+    events:
+      - {timestamp: '2026-09-02T14:00:00Z', EventID: 4624, LogonType: 3, AuthenticationPackageName: 'NTLM', TargetUserName: 'svc-legacy', IpAddress: '10.10.10.60', Computer: 'APP01'}
+      - {timestamp: '2026-09-02T14:05:00Z', EventID: 4624, LogonType: 3, AuthenticationPackageName: 'NTLM', TargetUserName: 'svc-legacy', IpAddress: '10.10.10.60', Computer: 'APP01'}
+      - {timestamp: '2026-09-02T14:10:00Z', EventID: 4624, LogonType: 3, AuthenticationPackageName: 'NTLM', TargetUserName: 'svc-legacy', IpAddress: '10.10.10.60', Computer: 'APP01'}
+      - {timestamp: '2026-09-02T14:15:00Z', EventID: 4624, LogonType: 3, AuthenticationPackageName: 'NTLM', TargetUserName: 'svc-legacy', IpAddress: '10.10.10.60', Computer: 'APP01'}

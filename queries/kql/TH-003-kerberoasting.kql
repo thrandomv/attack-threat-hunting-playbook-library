@@ -1,0 +1,50 @@
+// TH-003 | Surface: Microsoft Sentinel / Log Analytics
+// Purpose: Identify bursts of service-ticket requests across many user-backed SPNs.
+// Required data: SecurityEvent 4769 from all domain controllers.
+// ATT&CK: T1558.003 | Detection strategy DET0157 / AN0444
+// Tunable: Window (TimeWindow), MinDistinctServices (TGSRequestThreshold),
+//          EncryptionTypes (AllowedEncryptionTypes), ExcludedServices (ServiceAccountBaselines)
+let Lookback = 7d;
+let Window = 15m;
+let MinDistinctServices = 10;
+let MinTickets = 15;
+let EncryptionTypes = dynamic(["0x17", "0x18"]);   // RC4-HMAC. Empty this list to baseline all types.
+let ExcludedServices = dynamic(["krbtgt", "kadmin/changepw"]);
+let ApprovedRoasters = dynamic([]);                // e.g. AD assessment tooling: "CONTOSO\\svc-pingcastle"
+SecurityEvent
+| where TimeGenerated > ago(Lookback) and EventID == 4769
+| extend Requester   = tostring(column_ifexists("TargetUserName", Account)),
+         RequesterSid= tostring(column_ifexists("TargetUserSid", "")),
+         Service     = tostring(column_ifexists("ServiceName", "")),
+         SourceIp    = tostring(column_ifexists("IpAddress", column_ifexists("ClientAddress", ""))),
+         Encryption  = tolower(tostring(column_ifexists("TicketEncryptionType", ""))),
+         StatusCode  = tolower(tostring(column_ifexists("Status", "")))
+| where isempty(StatusCode) or StatusCode in ("0x0", "0")            // successful issuance only
+| where isnotempty(Service) and Service !endswith "$" and Service !in~ (ExcludedServices)
+| where Requester !endswith "$"                                       // machine accounts requesting their own services
+| where Requester !in~ (ApprovedRoasters)
+| where array_length(EncryptionTypes) == 0 or Encryption in (EncryptionTypes)
+| extend SourceIp = iff(SourceIp startswith "::ffff:", substring(SourceIp, 7), SourceIp)
+| summarize TicketCount = count(), DistinctServices = dcount(Service),
+            Services = make_set(Service, 30), EncryptionTypesSeen = make_set(Encryption, 5),
+            DomainControllers = make_set(Computer, 10),
+            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+            by Requester, RequesterSid, SourceIp, bin(TimeGenerated, Window)
+| where DistinctServices >= MinDistinctServices or TicketCount >= MinTickets
+| extend BurstSeconds = datetime_diff('second', LastSeen, FirstSeen),
+         ServicesPerMinute = round(todouble(DistinctServices) /
+                                   max_of(1.0, datetime_diff('second', LastSeen, FirstSeen) / 60.0), 2)
+| project TimeWindow = TimeGenerated, FirstSeen, LastSeen, BurstSeconds, Requester, RequesterSid,
+          SourceIp, TicketCount, DistinctServices, ServicesPerMinute, EncryptionTypesSeen,
+          Services, DomainControllers
+| order by DistinctServices desc, ServicesPerMinute desc
+//
+// Companion baseline (run before setting MinDistinctServices):
+// SecurityEvent
+// | where TimeGenerated > ago(30d) and EventID == 4769
+// | extend Requester = tostring(column_ifexists("TargetUserName", Account)),
+//          Service = tostring(column_ifexists("ServiceName", ""))
+// | where Requester !endswith "$" and Service !endswith "$"
+// | summarize DistinctServices = dcount(Service) by Requester, bin(TimeGenerated, 15m)
+// | summarize P50 = percentile(DistinctServices, 50), P95 = percentile(DistinctServices, 95),
+//             P99 = percentile(DistinctServices, 99), MaxObserved = max(DistinctServices)

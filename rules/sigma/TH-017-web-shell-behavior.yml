@@ -1,0 +1,78 @@
+title: Web Server Process Spawning a Shell, Discovery or Transfer Utility
+id: 2bb7f017-43d0-4a17-8c17-7d6a1f170017
+status: experimental
+description: |
+  Detects the behavioural signature of an active web shell: an IIS, Apache, nginx, PHP, Tomcat or
+  Node process spawning a command interpreter, a host-discovery utility, or a file-transfer tool.
+  On an internet-facing server a confirmed match should be handled as an incident. Shells that only
+  read or write files, and in-memory module shells, produce no child process and are out of scope.
+references:
+  - https://attack.mitre.org/techniques/T1505/003/
+  - https://attack.mitre.org/detectionstrategies/DET0394
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.persistence
+  - attack.t1505.003
+logsource:
+  category: process_creation
+detection:
+  selection_web_parent:
+    ParentImage|endswith:
+      - '\w3wp.exe'
+      - '\httpd.exe'
+      - '\apache.exe'
+      - '\apache2.exe'
+      - '\nginx.exe'
+      - '\php-cgi.exe'
+      - '\php.exe'
+      - '\tomcat.exe'
+      - '\tomcat9.exe'
+      - '\node.exe'
+      - '/httpd'
+      - '/apache2'
+      - '/nginx'
+      - '/php-fpm'
+  selection_shell_child:
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '/sh'
+      - '/bash'
+      - '/dash'
+      - '/zsh'
+  selection_discovery_child:
+    Image|endswith:
+      - '\whoami.exe'
+      - '\net.exe'
+      - '\net1.exe'
+      - '\nltest.exe'
+      - '\ipconfig.exe'
+      - '\systeminfo.exe'
+      - '\tasklist.exe'
+      - '\hostname.exe'
+      - '/whoami'
+      - '/id'
+      - '/uname'
+  selection_transfer_child:
+    Image|endswith:
+      - '\certutil.exe'
+      - '\bitsadmin.exe'
+      - '\curl.exe'
+      - '\wget.exe'
+      - '/curl'
+      - '/wget'
+  condition: selection_web_parent and 1 of selection_*_child
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Legitimate CGI applications that shell out by design.
+  - Build, deployment or monitoring jobs running under the web server account.
+level: critical

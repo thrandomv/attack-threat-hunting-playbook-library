@@ -1,0 +1,88 @@
+title: Entra OAuth Consent Granted With Sensitive Graph Scopes
+id: 2bb7f023-43d0-4a23-8c23-7d6a1f230023
+status: experimental
+description: |
+  Detects consent to an application, delegated permission grants, or app role assignments where the
+  granted scopes include mail, file, site or directory access. Token-based access obtained this way
+  survives password resets and is not challenged by MFA, which is what makes it attractive as cloud
+  persistence. Allowlist by application ID rather than display name - the display name is chosen by
+  whoever registered the application.
+references:
+  - https://attack.mitre.org/techniques/T1528/
+  - https://attack.mitre.org/detectionstrategies/DET0515
+author: Hamza Khella
+date: 2026-09-10
+modified: 2026-09-10
+tags:
+  - attack.credential-access
+  - attack.persistence
+  - attack.t1528
+logsource:
+  product: azure
+  service: auditlogs
+detection:
+  selection_consent_operation:
+    OperationName:
+      - 'Consent to application'
+      - 'Add delegated permission grant'
+      - 'Add app role assignment to service principal'
+  selection_sensitive_scope:
+    Properties|contains:
+      - 'Mail.Read'
+      - 'Mail.ReadWrite'
+      - 'Mail.Send'
+      - 'Files.ReadWrite.All'
+      - 'Files.Read.All'
+      - 'Sites.ReadWrite.All'
+      - 'Directory.ReadWrite.All'
+      - 'Directory.Read.All'
+      - 'Application.ReadWrite.All'
+      - 'full_access_as_user'
+  condition: selection_consent_operation and selection_sensitive_scope
+fields:
+  - OperationName
+  - InitiatedBy
+  - TargetResources
+  - Properties
+falsepositives:
+  - Onboarding of a legitimate SaaS integration by IT.
+  - In-house applications granted permissions through a change process.
+level: high
+---
+title: Credential Added to an Entra Application or Service Principal
+id: 2bb7f123-43d0-4b23-8d23-7d6a1f230123
+status: experimental
+description: |
+  Detects a secret or certificate added to an existing application or service principal. This is the
+  quieter half of cloud persistence: no consent prompt, no new application, and the resulting token
+  authenticates without MFA. Alert on it and verify the actor holds an application-administrator
+  role legitimately.
+references:
+  - https://attack.mitre.org/techniques/T1098/001/
+  - https://attack.mitre.org/detectionstrategies/DET0531
+author: Hamza Khella
+date: 2026-09-10
+modified: 2026-09-10
+tags:
+  - attack.persistence
+  - attack.privilege-escalation
+  - attack.t1098.001
+logsource:
+  product: azure
+  service: auditlogs
+detection:
+  selection_credential_operation:
+    OperationName:
+      - 'Add service principal credentials'
+      - 'Update application - Certificates and secrets management'
+      - 'Add owner to application'
+      - 'Add owner to service principal'
+  condition: selection_credential_operation
+fields:
+  - OperationName
+  - InitiatedBy
+  - TargetResources
+falsepositives:
+  - Application lifecycle platforms rotating secrets on schedule.
+  - Developers rotating credentials for their own applications during a change window.
+level: high

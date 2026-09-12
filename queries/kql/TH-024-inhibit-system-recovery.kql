@@ -1,0 +1,59 @@
+// TH-024 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Detect destruction of recovery capability - the last reversible step before encryption.
+// Required data: DeviceProcessEvents. Add registry telemetry for the process-free path.
+// ATT&CK: T1490 | Detection strategy DET0329 / AN0933
+// Tunable: ApprovedBackupParents (ParentProcessContext), command patterns (CommandLinePattern)
+let Lookback = 7d;
+let ApprovedBackupParents = dynamic([]);   // Full paths of backup product executables, e.g.
+                                           // "c:\\program files\\veeam\\backup\\veeamagent.exe"
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| extend Cmd = tolower(ProcessCommandLine), Image = tolower(FileName),
+         ParentPath = tolower(InitiatingProcessFolderPath)
+| where not(ParentPath in~ (ApprovedBackupParents))
+| extend
+    ShadowDelete   = (Image == "vssadmin.exe" and Cmd contains "delete" and Cmd contains "shadow")
+                     or (Image == "wmic.exe" and Cmd contains "shadowcopy" and Cmd contains "delete")
+                     or (Cmd contains "win32_shadowcopy" and Cmd contains "delete")
+                     or (Cmd contains "get-wmiobject" and Cmd contains "win32_shadowcopy" and Cmd contains "remove"),
+    ShadowResize   = Image == "vssadmin.exe" and Cmd contains "resize" and Cmd contains "shadowstorage",
+    CatalogDelete  = Image == "wbadmin.exe" and Cmd contains "delete"
+                     and (Cmd contains "catalog" or Cmd contains "systemstatebackup" or Cmd contains "backup"),
+    RecoveryDisable= (Image == "bcdedit.exe" and (Cmd contains "recoveryenabled no"
+                     or Cmd contains "bootstatuspolicy ignoreallfailures" or Cmd contains "safeboot"))
+                     or (Image == "reagentc.exe" and Cmd contains "/disable"),
+    DiskshadowUse  = Image == "diskshadow.exe" and (Cmd contains "/s" or Cmd contains "delete"),
+    RestoreDisable = Cmd contains "disable-computerrestore" or Cmd contains "srremoverestorepoint"
+                     or (Cmd contains "systemrestore" and (Cmd contains "disable" or Cmd contains "/f"))
+| where ShadowDelete or ShadowResize or CatalogDelete or RecoveryDisable or DiskshadowUse or RestoreDisable
+| extend Category = case(
+    ShadowDelete,   "Volume shadow copies deleted",
+    ShadowResize,   "Shadow storage resized - copies silently discarded",
+    CatalogDelete,  "Backup catalog or system state backup deleted",
+    RecoveryDisable,"Windows recovery environment disabled",
+    DiskshadowUse,  "diskshadow script execution",
+                    "System Restore disabled"),
+    SignalCount = toint(ShadowDelete) + toint(ShadowResize) + toint(CatalogDelete)
+                + toint(RecoveryDisable) + toint(DiskshadowUse) + toint(RestoreDisable)
+| project Timestamp, DeviceName, AccountDomain, AccountName, Category, FileName, FolderPath, SHA256,
+          ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessFolderPath,
+          InitiatingProcessCommandLine, InitiatingProcessAccountName, SignalCount,
+          ShadowDelete, ShadowResize, CatalogDelete, RecoveryDisable, DiskshadowUse, RestoreDisable
+| order by Timestamp desc
+//
+// Deployment scope - the same command across many hosts in minutes is a mass-deployment event:
+// DeviceProcessEvents
+// | where Timestamp > ago(1d)
+// | where tolower(ProcessCommandLine) contains "delete" and tolower(ProcessCommandLine) contains "shadow"
+// | summarize Hosts = dcount(DeviceName), HostList = make_set(DeviceName, 50),
+//             FirstSeen = min(Timestamp), LastSeen = max(Timestamp) by bin(Timestamp, 15m)
+// | where Hosts >= 2
+// | order by Hosts desc
+//
+// Registry companion (System Restore disabled without a recovery utility):
+// DeviceRegistryEvents
+// | where Timestamp > ago(Lookback)
+// | where RegistryKey has_any ("SystemRestore", "Windows NT\\CurrentVersion\\WinRE", "SPP\\Clients")
+// | where ActionType in ("RegistryValueSet", "RegistryKeyDeleted")
+// | project Timestamp, DeviceName, RegistryKey, RegistryValueName, RegistryValueData,
+//           InitiatingProcessFileName, InitiatingProcessCommandLine

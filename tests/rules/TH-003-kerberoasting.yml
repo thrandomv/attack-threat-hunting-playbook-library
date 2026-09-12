@@ -1,0 +1,98 @@
+rule: TH-003-kerberoasting
+description: >
+  Base-rule cases prove the encryption, service and requester filters. Correlation cases prove the
+  detection keys on distinct-SPN breadth inside the window, not on request volume, and that a
+  low-and-slow burst spread over two hours falls outside the timespan by design.
+cases:
+  - name: RC4 ticket for a user-backed SPN
+    expect: match
+    target: th003_rc4_service_ticket
+    event:
+      EventID: 4769
+      TargetUserName: 'jdoe'
+      ServiceName: 'MSSQLSvc/sql01.contoso.local:1433'
+      TicketEncryptionType: '0x17'
+      Status: '0x0'
+      IpAddress: '10.20.30.40'
+
+  - name: AES ticket is out of scope for the RC4 base rule
+    expect: no_match
+    target: th003_rc4_service_ticket
+    event:
+      EventID: 4769
+      TargetUserName: 'jdoe'
+      ServiceName: 'MSSQLSvc/sql01.contoso.local:1433'
+      TicketEncryptionType: '0x12'
+      Status: '0x0'
+      IpAddress: '10.20.30.40'
+
+  - name: Machine-backed SPN request
+    expect: no_match
+    target: th003_rc4_service_ticket
+    event:
+      EventID: 4769
+      TargetUserName: 'jdoe'
+      ServiceName: 'WKS-1234$'
+      TicketEncryptionType: '0x17'
+      Status: '0x0'
+
+  - name: Failed ticket request
+    expect: no_match
+    target: th003_rc4_service_ticket
+    event:
+      EventID: 4769
+      TargetUserName: 'jdoe'
+      ServiceName: 'MSSQLSvc/sql01.contoso.local:1433'
+      TicketEncryptionType: '0x17'
+      Status: '0x1F'
+
+  - name: Twelve distinct SPNs in ten minutes
+    expect: match
+    target: 2bb7f103-43d0-4b03-8d03-7d6a1f030103
+    events:
+      - {timestamp: '2026-09-01T09:00:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:05Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'MSSQLSvc/sql02:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:11Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'HTTP/intranet', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:17Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'HTTP/reports', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:23Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'CIFS/fs01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:29Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'CIFS/fs02', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:35Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'TERMSRV/jump01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:41Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'ldap/dc01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:47Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'exchangeMDB/mbx01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:53Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'SAP/erp01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:59Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'FIMService/mim01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:01:05Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'backup/veeam01', TicketEncryptionType: '0x17', Status: '0x0'}
+
+  - name: High volume against a single SPN is not enumeration
+    expect: no_match
+    target: 2bb7f103-43d0-4b03-8d03-7d6a1f030103
+    events:
+      - {timestamp: '2026-09-01T09:00:00Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:10Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:20Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:30Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:40Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:00:50Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:01:00Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:01:10Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:01:20Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:01:30Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:01:40Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:01:50Z', EventID: 4769, TargetUserName: 'svc-app', IpAddress: '10.20.30.41', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+
+  - name: Same breadth spread over two hours falls outside the window
+    expect: no_match
+    target: 2bb7f103-43d0-4b03-8d03-7d6a1f030103
+    events:
+      - {timestamp: '2026-09-01T09:00:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'MSSQLSvc/sql01:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:12:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'MSSQLSvc/sql02:1433', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:24:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'HTTP/intranet', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:36:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'HTTP/reports', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T09:48:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'CIFS/fs01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T10:00:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'CIFS/fs02', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T10:12:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'TERMSRV/jump01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T10:24:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'ldap/dc01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T10:36:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'exchangeMDB/mbx01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T10:48:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'SAP/erp01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T11:00:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'FIMService/mim01', TicketEncryptionType: '0x17', Status: '0x0'}
+      - {timestamp: '2026-09-01T11:12:00Z', EventID: 4769, TargetUserName: 'jdoe', IpAddress: '10.20.30.40', ServiceName: 'backup/veeam01', TicketEncryptionType: '0x17', Status: '0x0'}

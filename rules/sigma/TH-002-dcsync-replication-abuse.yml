@@ -1,0 +1,51 @@
+title: Directory Replication Rights Used by a Non-Replication Principal (DCSync)
+id: 2bb7f002-43d0-4a02-8c02-7d6a1f020002
+status: experimental
+description: |
+  Detects Security event 4662 referencing the Active Directory replication control-access rights
+  from a principal that is not an approved replication identity. Requires Directory Service Access
+  auditing and a SACL that audits control-access rights on the domain naming context. The filter
+  list below is a placeholder: replace it with your real domain controller and directory
+  synchronisation accounts before deployment, ideally resolved by SID.
+references:
+  - https://attack.mitre.org/techniques/T1003/006/
+  - https://attack.mitre.org/detectionstrategies/DET0594
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.credential-access
+  - attack.t1003.006
+  - detection.threat-hunting
+logsource:
+  product: windows
+  service: security
+detection:
+  selection_replication:
+    EventID: 4662
+    Properties|contains:
+      - '1131f6aa-9c07-11d1-f79f-00c04fc2dcd2'
+      - '1131f6ad-9c07-11d1-f79f-00c04fc2dcd2'
+      - '89e95b76-444d-4c62-991a-0facbeda640c'
+  filter_domain_controllers:
+    SubjectUserName:
+      - 'DC01$'
+      - 'DC02$'
+  filter_directory_sync:
+    SubjectUserName|startswith:
+      - 'MSOL_'
+      - 'svc-adsync'
+  filter_system:
+    SubjectUserName: 'ANONYMOUS LOGON'
+  condition: selection_replication and not 1 of filter_*
+fields:
+  - SubjectUserName
+  - SubjectUserSid
+  - ObjectName
+  - Properties
+  - Computer
+falsepositives:
+  - Entra Connect / Azure AD Connect synchronisation accounts.
+  - Backup, migration or password-audit products holding replication rights.
+  - Domain controller promotion and demotion activity.
+level: critical

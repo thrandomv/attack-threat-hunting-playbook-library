@@ -1,0 +1,50 @@
+title: Encoded-Like DNS Query Label
+id: 2bb7f008-43d0-4a08-8c08-7d6a1f080008
+status: experimental
+description: |
+  Detects a single DNS query whose leftmost label looks encoded: 45 or more base32/base64-safe
+  characters, or 25 or more such characters combined with a record type used for data transport
+  (TXT, NULL, ANY). Record type alone never fires this rule - SPF, DKIM, DMARC and domain
+  verification make plain TXT lookups ubiquitous. Volume, uniqueness ratio, NXDOMAIN rate and
+  periodicity remain SIEM-side analytics; see the companion KQL.
+references:
+  - https://attack.mitre.org/techniques/T1071/004/
+  - https://attack.mitre.org/detectionstrategies/DET0400
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.command-and-control
+  - attack.t1071.004
+logsource:
+  category: dns
+detection:
+  selection_long_label:
+    query|re: '^[A-Za-z0-9_-]{45,}\.'
+  selection_encoded_rare_type:
+    query|re: '^[A-Za-z0-9_-]{25,}\.'
+    query_type:
+      - 'TXT'
+      - 'NULL'
+      - 'ANY'
+  filter_known_vendor_suffixes:
+    query|endswith:
+      - '.sophosxl.net'
+      - '.spamhaus.org'
+      - '.senderbase.org'
+      - '.avqs.mcafee.com'
+      - '.trendmicro.com'
+      - '.cloudfront.net'
+      - '.akamaiedge.net'
+      - '.akadns.net'
+      - '.events.data.microsoft.com'
+  condition: 1 of selection_* and not 1 of filter_*
+fields:
+  - query
+  - query_type
+  - src_ip
+falsepositives:
+  - Endpoint security and anti-spam reputation lookups that encode hashes into labels.
+  - CDN, telemetry and certificate-validation traffic with long generated labels.
+  - Dynamic DNS and service-discovery records.
+level: medium

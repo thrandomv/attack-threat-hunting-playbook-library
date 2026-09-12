@@ -1,0 +1,25 @@
+# Build output
+site/
+site-src/
+dist/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Never commit real telemetry, exports or credentials
+*.evtx
+*.pcap
+*.csv
+*.env
+secrets/

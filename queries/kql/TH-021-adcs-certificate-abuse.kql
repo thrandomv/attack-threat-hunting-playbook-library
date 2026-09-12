@@ -1,0 +1,60 @@
+// TH-021 | Surface: Microsoft Sentinel / Log Analytics
+// Purpose: Find certificate requests that specify a subject alternative name on templates that
+//          should not accept one, and certificates issued to a different identity than the requester.
+// Required data: SecurityEvent 4886/4887 from enterprise CAs with Certificate Services auditing on.
+// ATT&CK: T1649 | Detection strategy DET0240 / AN0671
+// Tunable: SanAllowedTemplates (EKU_Thresholds), PrivilegedNamePatterns (LogonContext)
+let Lookback = 14d;
+// Templates that legitimately accept a requester-supplied SAN (web servers, load balancers).
+let SanAllowedTemplates = dynamic(["webserver", "web server", "sslcertificate", "loadbalancer"]);
+// Replace with your own privileged naming convention, or resolve membership from a watchlist.
+let PrivilegedNamePatterns = dynamic(["admin", "adm-", "da-", "svc-", "root", "krbtgt", "$"]);
+let ApprovedEnrolmentAccounts = dynamic([]);   // Automated enrolment service accounts.
+SecurityEvent
+| where TimeGenerated > ago(Lookback) and EventID in (4886, 4887)
+| extend Requester  = tostring(column_ifexists("SubjectAccount", Account)),
+         RequestId  = tostring(column_ifexists("RequestId", "")),
+         Attributes = tostring(column_ifexists("Attributes", "")),
+         CertSubject= tostring(column_ifexists("Subject", "")),
+         Template   = tolower(tostring(column_ifexists("CertificateTemplate", ""))),
+         Serial     = tostring(column_ifexists("SerialNumber", ""))
+| extend AttributesLower = tolower(Attributes)
+| extend HasSanAttribute = AttributesLower contains "san:" or AttributesLower contains "subjectaltname"
+                           or AttributesLower contains "upn=" or AttributesLower contains "dns=",
+         TemplateAllowsSan = Template has_any (SanAllowedTemplates)
+| where HasSanAttribute and not(TemplateAllowsSan)
+| where Requester !in~ (ApprovedEnrolmentAccounts)
+// Extract the requested identity from the attribute blob for comparison with the requester.
+| extend RequestedUpn = extract(@"(?i)upn=([^\s&,]+)", 1, Attributes),
+         RequestedDns = extract(@"(?i)dns=([^\s&,]+)", 1, Attributes)
+| extend RequesterShort = tolower(tostring(split(Requester, "\\")[-1])),
+         RequestedShort = tolower(tostring(split(RequestedUpn, "@")[0]))
+| extend IdentityMismatch = isnotempty(RequestedShort) and RequestedShort != RequesterShort,
+         PrivilegedTarget = tolower(RequestedUpn) has_any (PrivilegedNamePatterns)
+                            or tolower(CertSubject) has_any (PrivilegedNamePatterns)
+| extend Severity = case(
+    PrivilegedTarget and IdentityMismatch, "critical - certificate for a privileged identity",
+    IdentityMismatch,                      "high - certificate subject differs from requester",
+                                           "medium - requester-supplied SAN on an unexpected template"),
+         Issued = EventID == 4887
+| project TimeGenerated, Computer, EventID, Issued, Severity, Requester, RequestId, Template,
+          CertSubject, RequestedUpn, RequestedDns, IdentityMismatch, PrivilegedTarget, Serial, Attributes
+| order by Severity asc, TimeGenerated desc
+//
+// Follow-on: was the certificate used to obtain a Kerberos ticket?
+// SecurityEvent
+// | where TimeGenerated > ago(Lookback) and EventID == 4768
+// | extend CertSerial = tostring(column_ifexists("CertSerialNumber", ""))
+// | where isnotempty(CertSerial)
+// | project TimeGenerated, Computer, TargetUserName = column_ifexists("TargetUserName", ""),
+//           IpAddress = column_ifexists("IpAddress", ""), CertSerial,
+//           CertIssuerName = column_ifexists("CertIssuerName", "")
+//
+// Endpoint-side tooling (Defender XDR):
+// DeviceProcessEvents
+// | where Timestamp > ago(Lookback)
+// | extend Cmd = tolower(ProcessCommandLine)
+// | where Cmd contains "certipy" or Cmd contains "certify.exe" or Cmd contains " req /template"
+//      or (Cmd contains "rubeus" and Cmd contains "asktgt" and Cmd contains "/certificate")
+//      or Cmd contains "export-certificate" or Cmd contains "certutil -exportpfx"
+// | project Timestamp, DeviceName, AccountName, FileName, ProcessCommandLine, InitiatingProcessFileName

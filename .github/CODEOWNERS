@@ -1,0 +1,9 @@
+# Detection content and its tooling are reviewed by the repository owner.
+*                       @thrandomv
+
+/rules/sigma/           @thrandomv
+/queries/kql/           @thrandomv
+/tests/                 @thrandomv
+/scripts/               @thrandomv
+/mappings/              @thrandomv
+/validation/            @thrandomv

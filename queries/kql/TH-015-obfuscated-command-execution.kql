@@ -1,0 +1,54 @@
+// TH-015 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Score encoded and obfuscated command-line structure without decoding content.
+// Required data: DeviceProcessEvents with untruncated command lines.
+// ATT&CK: T1027.010 (Stealth / TA0005) | Detection strategy DET0505 / AN1394
+// Tunable: densities (SuspiciousCharacterCount), token length (EncodedExecRegex),
+//          MinSignalCount (CommandLineEntropyThreshold)
+let Lookback = 7d;
+let MinSignalCount = 2;
+let CaretDensityThreshold = 8;
+let BacktickDensityThreshold = 8;
+let Interpreters = dynamic(["powershell.exe", "pwsh.exe", "cmd.exe", "wscript.exe", "cscript.exe",
+                            "mshta.exe", "rundll32.exe", "regsvr32.exe", "python.exe", "python3.exe",
+                            "node.exe", "wmic.exe"]);
+let SuspiciousParents = dynamic(["winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe",
+                                 "acrord32.exe", "mshta.exe", "w3wp.exe", "wmiprvse.exe",
+                                 "chrome.exe", "msedge.exe"]);
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| where tolower(FileName) in~ (Interpreters)
+| extend Cmd = tostring(ProcessCommandLine), LowerCmd = tolower(ProcessCommandLine)
+| extend CmdLength = strlen(Cmd)
+| extend ExplicitEncoding   = LowerCmd matches regex @"\s-{1,2}e(nc|ncodedcommand|ncoded)?\s+[a-z0-9+/=]{20,}"
+                              or LowerCmd contains "frombase64string" or LowerCmd contains "base64 -d"
+                              or LowerCmd contains "certutil -decode",
+         LongBase64Token    = Cmd matches regex @"[A-Za-z0-9+/]{100,}={0,2}",
+         CaretDensity       = strlen(Cmd) - strlen(replace_string(Cmd, "^", "")),
+         BacktickDensity    = strlen(Cmd) - strlen(replace_string(Cmd, "`", "")),
+         QuoteDensity       = strlen(Cmd) - strlen(replace_string(Cmd, "'", "")),
+         VariableIndirection= LowerCmd contains "%comspec%" or LowerCmd contains "%windir%"
+                              or LowerCmd contains "${env:" or LowerCmd contains "[char]"
+                              or LowerCmd contains "substring(" or LowerCmd contains "-join"
+                              or LowerCmd contains "[convert]::" or LowerCmd contains "invoke-expression",
+         SuspiciousParent   = tolower(InitiatingProcessFileName) in~ (SuspiciousParents)
+| extend HeavyEscaping = CaretDensity >= CaretDensityThreshold or BacktickDensity >= BacktickDensityThreshold
+| extend SignalCount = toint(ExplicitEncoding) + toint(LongBase64Token) + toint(HeavyEscaping)
+                     + toint(VariableIndirection) + toint(SuspiciousParent)
+| where SignalCount >= MinSignalCount
+     or (SuspiciousParent and (ExplicitEncoding or LongBase64Token or HeavyEscaping))
+| project Timestamp, DeviceName, AccountDomain, AccountName, FileName, CmdLength, ProcessCommandLine,
+          SHA256, InitiatingProcessFileName, InitiatingProcessCommandLine, SignalCount,
+          ExplicitEncoding, LongBase64Token, CaretDensity, BacktickDensity, QuoteDensity,
+          VariableIndirection, SuspiciousParent
+| order by SignalCount desc, CmdLength desc
+//
+// Baseline first - set thresholds from your own distribution, not from this file:
+// DeviceProcessEvents
+// | where Timestamp > ago(30d) and tolower(FileName) in~ (Interpreters)
+// | extend Cmd = tostring(ProcessCommandLine)
+// | extend CaretDensity = strlen(Cmd) - strlen(replace_string(Cmd, "^", "")),
+//          BacktickDensity = strlen(Cmd) - strlen(replace_string(Cmd, "`", ""))
+// | summarize P50 = percentile(strlen(Cmd), 50), P95 = percentile(strlen(Cmd), 95),
+//             P99 = percentile(strlen(Cmd), 99), MaxLength = max(strlen(Cmd)),
+//             CaretP99 = percentile(CaretDensity, 99), BacktickP99 = percentile(BacktickDensity, 99)
+// // A round MaxLength (4096, 8192) means your command lines are truncated - fix that before hunting.

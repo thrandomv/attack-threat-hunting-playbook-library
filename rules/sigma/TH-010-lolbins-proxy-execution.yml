@@ -1,0 +1,71 @@
+title: System Binary Proxy Execution With Remote or Script Content
+id: 2bb7f010-43d0-4a10-8c10-7d6a1f100010
+status: experimental
+description: |
+  Detects signed Windows binaries used to execute attacker-controlled content: remote or UNC
+  references, script protocols and scriptlets, or payloads staged in user-writable directories.
+  Local, signed installer activity is intentionally out of scope - remote content is the signal.
+references:
+  - https://attack.mitre.org/techniques/T1218/
+  - https://attack.mitre.org/detectionstrategies/DET0081
+  - https://lolbas-project.github.io/
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.stealth
+  - attack.t1218
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_proxy_binary:
+    Image|endswith:
+      - '\mshta.exe'
+      - '\regsvr32.exe'
+      - '\rundll32.exe'
+      - '\msiexec.exe'
+      - '\cmstp.exe'
+      - '\installutil.exe'
+      - '\regasm.exe'
+      - '\regsvcs.exe'
+      - '\odbcconf.exe'
+      - '\mavinject.exe'
+      - '\protocolhandler.exe'
+      - '\Microsoft.Workflow.Compiler.exe'
+  sig_remote_content:
+    CommandLine|contains:
+      - 'http://'
+      - 'https://'
+      - 'ftp://'
+      - '\\\\'
+  sig_script_content:
+    CommandLine|contains:
+      - 'javascript:'
+      - 'vbscript:'
+      - 'scrobj.dll'
+      - '.sct'
+      - 'advpack.dll'
+      - 'ieadvpack.dll'
+  sig_writable_payload:
+    CommandLine|contains:
+      - '\AppData\'
+      - '\Users\Public\'
+      - '\Windows\Temp\'
+      - '\ProgramData\'
+      - '\Downloads\'
+  filter_windows_update_msiexec:
+    Image|endswith: '\msiexec.exe'
+    CommandLine|contains: '/uninstall'
+    ParentImage|endswith: '\services.exe'
+  condition: selection_proxy_binary and 1 of sig_* and not 1 of filter_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Installers and updaters invoking msiexec, rundll32 or installutil with local packages.
+  - Software deployment from an internal share; allowlist the share path explicitly.
+  - Line-of-business applications registering COM components at first run.
+level: high

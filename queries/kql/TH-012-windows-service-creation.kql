@@ -1,0 +1,49 @@
+// TH-012 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Detect suspicious service creation and configuration changes.
+// Required data: DeviceProcessEvents. Pair with System 7045 / Security 4697 and registry telemetry.
+// ATT&CK: T1543.003 | Detection strategy DET0552 / AN1527
+// Tunable: path fragments (ImagePathFilter), SecurityServiceNames (ServiceNamePattern)
+let Lookback = 7d;
+let SecurityServiceNames = dynamic(["windefend", "wdnissvc", "sense", "mpssvc", "eventlog",
+                                    "sysmon", "wdfilter", "securityhealthservice", "wscsvc"]);
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| extend Cmd = tolower(ProcessCommandLine), Image = tolower(FileName)
+| where (Image == "sc.exe" and (Cmd contains " create" or Cmd contains " config" or Cmd contains " failure"))
+     or (Image in~ ("powershell.exe", "pwsh.exe")
+         and (Cmd contains "new-service" or Cmd contains "set-service"))
+| extend RemoteTarget      = Cmd matches regex @"sc(\.exe)?\s+\\\\[^\s\\]+"
+                             or Cmd contains "-computername",
+         InterpreterPath   = Cmd contains "cmd.exe" or Cmd contains "powershell" or Cmd contains "pwsh"
+                             or Cmd contains "wscript" or Cmd contains "cscript" or Cmd contains "mshta"
+                             or Cmd contains "rundll32" or Cmd contains "regsvr32",
+         WritablePath      = Cmd contains "\\appdata\\" or Cmd contains "\\users\\public\\"
+                             or Cmd contains "\\windows\\temp\\" or Cmd contains "\\downloads\\"
+                             or Cmd contains "\\programdata\\" or Cmd contains "\\perflogs\\",
+         UncPath           = Cmd contains "binpath= \\\\" or Cmd contains "binpath=\\\\",
+         AutoStart         = Cmd contains "start= auto" or Cmd contains "start= delayed-auto",
+         Disabling         = Cmd contains "start= disabled" or Cmd contains "-startuptype disabled",
+         SecurityService   = Cmd has_any (SecurityServiceNames),
+         DriverService     = Cmd contains "type= kernel" or Cmd contains "type= filesys" or Cmd contains ".sys"
+| where RemoteTarget or InterpreterPath or WritablePath or UncPath or DriverService
+     or (SecurityService and (Disabling or Cmd contains " config"))
+| extend SignalCount = toint(RemoteTarget) + toint(InterpreterPath) + toint(WritablePath)
+                     + toint(UncPath) + toint(AutoStart) + toint(SecurityService) + toint(DriverService),
+         Assessment = case(
+            SecurityService and Disabling, "Security service being disabled - see TH-014",
+            DriverService,                 "Driver service - review signature and BYOVD risk",
+            RemoteTarget,                  "Remote service creation - lateral movement",
+            InterpreterPath,               "Service binary is a command interpreter",
+            WritablePath or UncPath,       "Service binary in a writable or remote path",
+                                           "Service change requires review")
+| project Timestamp, DeviceName, AccountDomain, AccountName, FileName, ProcessCommandLine,
+          InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName,
+          Assessment, SignalCount, RemoteTarget, InterpreterPath, WritablePath, UncPath,
+          AutoStart, Disabling, SecurityService, DriverService
+| order by SignalCount desc, Timestamp desc
+//
+// Platform-side companion (catches direct SCM API use, which has no command line):
+// Sentinel:  Event | where EventID == 7045
+//            | project TimeGenerated, Computer, ServiceName, ImagePath, ServiceType,
+//                       StartType, AccountName
+// Defender:  DeviceEvents | where ActionType == "ServiceInstalled" | project Timestamp, DeviceName, AdditionalFields

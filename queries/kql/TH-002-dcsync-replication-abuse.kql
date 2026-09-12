@@ -1,0 +1,40 @@
+// TH-002 | Surface: Microsoft Sentinel / Log Analytics
+// Purpose: Find directory replication rights exercised by principals that are not domain controllers.
+// Required data: SecurityEvent 4662 from all DCs, with Directory Service Access auditing + SACL.
+// ATT&CK: T1003.006 | Detection strategy DET0594 / AN1632
+// Tunable: Lookback (TimeWindow), ApprovedReplicationAccounts + DomainControllerAccounts (UserContext)
+let Lookback = 14d;
+let ReplicationRightGuids = dynamic([
+  "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2", // Replicating Directory Changes
+  "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2", // Replicating Directory Changes All
+  "89e95b76-444d-4c62-991a-0facbeda640c"  // Replicating Directory Changes In Filtered Set
+]);
+// Replace both lists with reference data (a Sentinel watchlist is the maintainable option).
+// Match on SID where possible: names are renameable, SIDs are not.
+let DomainControllerAccounts = dynamic(["CONTOSO\\DC01$", "CONTOSO\\DC02$"]);
+let ApprovedReplicationAccounts = dynamic(["CONTOSO\\MSOL_a1b2c3d4e5f6", "CONTOSO\\svc-adsync"]);
+SecurityEvent
+| where TimeGenerated > ago(Lookback) and EventID == 4662
+| extend Properties = tostring(column_ifexists("Properties", "")),
+         ObjectName = tostring(column_ifexists("ObjectName", "")),
+         Subject = tostring(column_ifexists("SubjectAccount", Account)),
+         SubjectSid = tostring(column_ifexists("SubjectUserSid", "")),
+         SourceIp = tostring(column_ifexists("IpAddress", ""))
+// The right GUID appears in Properties; fall back to the raw payload if the parser differs.
+| extend Haystack = tolower(strcat(Properties, " ", column_ifexists("EventData", ""), " ", Activity))
+| where Haystack has_any (ReplicationRightGuids)
+| where Subject !in~ (DomainControllerAccounts) and Subject !in~ (ApprovedReplicationAccounts)
+| extend RightRequested = case(
+    Haystack contains "1131f6ad-9c07-11d1-f79f-00c04fc2dcd2", "Replicating Directory Changes All",
+    Haystack contains "1131f6aa-9c07-11d1-f79f-00c04fc2dcd2", "Replicating Directory Changes",
+    Haystack contains "89e95b76-444d-4c62-991a-0facbeda640c", "Replicating Directory Changes In Filtered Set",
+    "Unknown")
+| summarize EventCount = count(), Rights = make_set(RightRequested, 5),
+            Objects = make_set(ObjectName, 20), SourceIps = make_set(SourceIp, 10),
+            DomainControllers = make_set(Computer, 10),
+            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+            by Subject, SubjectSid
+| extend DurationMinutes = round(datetime_diff('second', LastSeen, FirstSeen) / 60.0, 1)
+| project FirstSeen, LastSeen, DurationMinutes, Subject, SubjectSid, EventCount, Rights,
+          DomainControllers, SourceIps, Objects
+| order by EventCount desc

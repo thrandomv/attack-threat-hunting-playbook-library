@@ -1,0 +1,72 @@
+title: Suspicious Windows Service Creation or Reconfiguration
+id: 2bb7f012-43d0-4a12-8c12-7d6a1f120012
+status: experimental
+description: |
+  Detects service creation or configuration where the binary path is a command interpreter, sits in
+  a user-writable or UNC path, targets a remote host, or where a security service is being
+  reconfigured or disabled. Tools that call the Service Control Manager API directly leave no
+  command line - System 7045 is the companion source.
+references:
+  - https://attack.mitre.org/techniques/T1543/003/
+  - https://attack.mitre.org/detectionstrategies/DET0552
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.persistence
+  - attack.privilege-escalation
+  - attack.t1543.003
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_sc:
+    Image|endswith: '\sc.exe'
+    CommandLine|contains:
+      - ' create'
+      - ' config'
+  selection_cmdlet:
+    Image|endswith:
+      - '\powershell.exe'
+      - '\pwsh.exe'
+    CommandLine|contains:
+      - 'New-Service'
+      - 'Set-Service'
+  sig_interpreter_path:
+    CommandLine|contains:
+      - 'cmd.exe'
+      - 'cmd /c'
+      - 'powershell'
+      - 'pwsh'
+      - 'wscript'
+      - 'cscript'
+      - 'mshta'
+      - 'rundll32'
+  sig_writable_path:
+    CommandLine|contains:
+      - '\AppData\'
+      - '\Users\Public\'
+      - '\Windows\Temp\'
+      - '\ProgramData\'
+      - '\PerfLogs\'
+      - '\Downloads\'
+  sig_remote:
+    CommandLine|re: 'sc(\.exe)?\s+\\\\[^\s\\]+'
+  sig_security_service:
+    CommandLine|contains:
+      - 'windefend'
+      - 'sense'
+      - 'eventlog'
+      - 'sysmon'
+      - 'wscsvc'
+      - 'mpssvc'
+  condition: 1 of selection_* and 1 of sig_*
+fields:
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Installers and agent updaters creating services during deployment.
+  - Administrators reconfiguring services in a documented change window.
+  - Driver installation by hardware vendor tooling.
+level: high

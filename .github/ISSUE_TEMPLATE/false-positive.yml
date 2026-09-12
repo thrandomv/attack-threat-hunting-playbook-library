@@ -1,0 +1,59 @@
+name: False positive report
+description: A rule fired on benign activity
+title: "[FP] TH-0NN: "
+labels: [false-positive, detection-content]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A reproducible false positive becomes a permanent negative test case in `tests/rules/`, so the
+        same match cannot silently return after the rule is changed. The more precisely you can
+        describe the benign event, the better that test case will be.
+  - type: input
+    id: playbook
+    attributes:
+      label: Playbook / rule ID
+      placeholder: TH-009 / 2bb7f009-43d0-4a09-8c09-7d6a1f090009
+    validations:
+      required: true
+  - type: textarea
+    id: event
+    attributes:
+      label: The benign event
+      description: Field names and values, with anything identifying replaced by a placeholder. This becomes the test fixture.
+      render: yaml
+      placeholder: |
+        Image: 'C:\Program Files\Vendor\agent.exe'
+        CommandLine: 'agent.exe --scan'
+        ParentImage: 'C:\Windows\System32\services.exe'
+    validations:
+      required: true
+  - type: textarea
+    id: explanation
+    attributes:
+      label: Why it is benign
+      description: What produces this activity, how you confirmed it, and how it can be distinguished from the malicious case.
+    validations:
+      required: true
+  - type: input
+    id: volume
+    attributes:
+      label: Volume
+      placeholder: e.g. ~400 matches/day across 120 hosts
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which surface fired
+      options:
+        - Sigma rule (converted)
+        - KQL hunt
+        - Both
+    validations:
+      required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: This report contains no customer, employer or personal data.
+          required: true

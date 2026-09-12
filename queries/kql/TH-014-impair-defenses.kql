@@ -1,0 +1,71 @@
+// TH-014 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Find commands that disable controls, add exclusions, weaken auditing or clear logs.
+// Required data: DeviceProcessEvents. Pair with registry telemetry and Security 1102 / System 104.
+// ATT&CK: T1685, T1685.005, T1112 (Defense Impairment / TA0112)
+//         | Detection strategies DET0497 / AN1369, DET0532 / AN1472, DET0280 / AN0781
+// Tunable: SecurityServiceNames (ServiceNames), ApprovedMaintenanceAccounts (ProcessNameExclusions)
+// Note: recovery deletion (vssadmin delete shadows) is T1490 / Impact - see TH-024.
+let Lookback = 7d;
+let SecurityServiceNames = dynamic(["windefend", "wdnissvc", "wdfilter", "sense", "mpssvc",
+                                    "eventlog", "sysmon", "sysmon64", "wscsvc", "securityhealthservice"]);
+let ApprovedMaintenanceAccounts = dynamic([]);   // e.g. "svc-imaging"
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| extend Cmd = tolower(ProcessCommandLine), Image = tolower(FileName)
+| where tolower(AccountName) !in~ (ApprovedMaintenanceAccounts)
+| extend
+    LogClear      = (Image == "wevtutil.exe" and (Cmd contains " cl " or Cmd contains "clear-log"))
+                    or Cmd contains "clear-eventlog" or Cmd contains "remove-eventlog"
+                    or (Image == "powershell.exe" and Cmd contains "eventlog" and Cmd contains "clear"),
+    DefenderChange= Cmd contains "set-mppreference" or Cmd contains "add-mppreference"
+                    or Cmd contains "disablerealtimemonitoring" or Cmd contains "disablebehaviormonitoring"
+                    or Cmd contains "disableioavprotection" or Cmd contains "disablescriptscanning"
+                    or Cmd contains "exclusionpath" or Cmd contains "exclusionprocess"
+                    or Cmd contains "exclusionextension" or Cmd contains "removedefinitions"
+                    or (Image == "mpcmdrun.exe" and Cmd contains "-removedefinitions"),
+    ServiceDisable= (Image in~ ("sc.exe", "net.exe", "net1.exe", "powershell.exe", "pwsh.exe")
+                     and (Cmd contains " stop " or Cmd contains "start= disabled"
+                          or Cmd contains "stop-service" or Cmd contains "-startuptype disabled")
+                     and Cmd has_any (SecurityServiceNames)),
+    FirewallChange= Image == "netsh.exe" and Cmd contains "firewall"
+                    and (Cmd contains "set opmode disable" or Cmd contains "state off"
+                         or Cmd contains "delete rule" or Cmd contains "set allprofiles state off"),
+    AuditChange   = Image == "auditpol.exe" and (Cmd contains "/clear" or Cmd contains "/remove"
+                    or Cmd contains "/set" and Cmd contains ":disable"),
+    AmsiEtwTamper = Cmd contains "amsienable" or Cmd contains "amsiutils" or Cmd contains "amsiinitfailed"
+                    or Cmd contains "microsoft.antimalware.scan" or Cmd contains "amsiproviders"
+                    or Cmd contains "etwenable" or Cmd contains "complus_etwenabled"
+                    or Cmd contains "autologger" and Cmd contains "enable",
+    LsaProtection = Cmd contains "runasppl",
+    TamperProtect = Cmd contains "tamperprotection"
+| where LogClear or DefenderChange or ServiceDisable or FirewallChange or AuditChange
+     or AmsiEtwTamper or LsaProtection or TamperProtect
+| extend Category = case(
+    LogClear,       "Event log cleared (T1685.005)",
+    AmsiEtwTamper,  "AMSI or ETW tampering (T1685)",
+    DefenderChange, "Antimalware configuration or exclusion change (T1685)",
+    ServiceDisable, "Security service stopped or disabled (T1685)",
+    AuditChange,    "Audit policy weakened (T1685)",
+    FirewallChange, "Host firewall disabled or rule removed (T1685)",
+    LsaProtection,  "LSA protection change (enables T1003.001)",
+                    "Tamper protection change (T1685)"),
+    SignalCount = toint(LogClear) + toint(DefenderChange) + toint(ServiceDisable)
+                + toint(FirewallChange) + toint(AuditChange) + toint(AmsiEtwTamper)
+                + toint(LsaProtection) + toint(TamperProtect)
+| project Timestamp, DeviceName, AccountDomain, AccountName, Category, FileName, FolderPath, SHA256,
+          ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine,
+          InitiatingProcessAccountName, SignalCount, LogClear, DefenderChange, ServiceDisable,
+          FirewallChange, AuditChange, AmsiEtwTamper, LsaProtection, TamperProtect
+| order by Timestamp desc
+//
+// Registry companion - tampering that never spawns a process:
+// DeviceRegistryEvents
+// | where Timestamp > ago(Lookback)
+// | where RegistryKey has_any ("Windows Defender", "AMSI\\Providers", "Windows Advanced Threat Protection",
+//                              "WINEVT\\Channels", "Autologger", "Policies\\Microsoft\\Windows Defender")
+// | where ActionType in ("RegistryValueSet", "RegistryKeyDeleted", "RegistryValueDeleted")
+// | project Timestamp, DeviceName, ActionType, RegistryKey, RegistryValueName, RegistryValueData,
+//           InitiatingProcessFileName, InitiatingProcessCommandLine, InitiatingProcessAccountName
+//
+// Log-clearing events themselves (Sentinel): Security 1102, System 104.
+// SecurityEvent | where EventID == 1102 | project TimeGenerated, Computer, Account, Activity

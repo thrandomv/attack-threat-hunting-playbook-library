@@ -1,0 +1,15 @@
+# Everything needed to validate, test and build this repository.
+# The Sigma evaluation engine itself needs nothing beyond PyYAML.
+
+PyYAML>=6.0.3
+
+# Optional: documentation site (make site)
+mkdocs>=1.6.1
+mkdocs-material>=9.7.7
+
+# Optional: YAML linting (make lint)
+yamllint>=1.38.0
+
+# Optional: Sigma conversion smoke tests (make sigma-convert)
+# Backend plugins are installed separately, e.g. `sigma plugin install splunk`
+sigma-cli>=3.1.0

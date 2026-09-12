@@ -1,0 +1,78 @@
+title: RC4 Service Ticket Requested for a User-Backed SPN
+name: th003_rc4_service_ticket
+id: 2bb7f003-43d0-4a03-8c03-7d6a1f030003
+status: experimental
+description: |
+  Base event for the Kerberoasting correlation below: a successful Kerberos service ticket request
+  (4769) encrypted with RC4 for a service principal name that is backed by a user account. A single
+  such request is normal in mixed-encryption estates and must not be alerted on by itself.
+references:
+  - https://attack.mitre.org/techniques/T1558/003/
+  - https://attack.mitre.org/detectionstrategies/DET0157
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.credential-access
+  - attack.t1558.003
+logsource:
+  product: windows
+  service: security
+detection:
+  selection_ticket:
+    EventID: 4769
+    TicketEncryptionType:
+      - '0x17'
+      - '0x18'
+    Status: '0x0'
+  filter_machine_service:
+    ServiceName|endswith: '$'
+  filter_krbtgt:
+    ServiceName:
+      - 'krbtgt'
+      - 'kadmin/changepw'
+  filter_machine_requester:
+    TargetUserName|endswith: '$'
+  condition: selection_ticket and not 1 of filter_*
+fields:
+  - TargetUserName
+  - ServiceName
+  - IpAddress
+  - TicketEncryptionType
+falsepositives:
+  - Legacy applications and appliances that negotiate RC4 by design.
+  - AD assessment tooling run by the identity team.
+level: informational
+---
+title: Kerberoasting - Service Ticket Burst Across Many User-Backed SPNs
+id: 2bb7f103-43d0-4b03-8d03-7d6a1f030103
+status: experimental
+description: |
+  Correlates RC4 service-ticket requests from one requester and source address across at least ten
+  distinct service principal names within fifteen minutes. Breadth, not volume, is the signal:
+  an application requesting one ticket repeatedly is normal, while one principal touching many
+  distinct services in minutes is enumeration.
+references:
+  - https://attack.mitre.org/techniques/T1558/003/
+  - https://attack.mitre.org/detectionstrategies/DET0157
+author: Hamza Khella
+date: 2026-09-10
+modified: 2026-09-10
+tags:
+  - attack.credential-access
+  - attack.t1558.003
+correlation:
+  type: value_count
+  rules:
+    - th003_rc4_service_ticket
+  group-by:
+    - TargetUserName
+    - IpAddress
+  timespan: 15m
+  condition:
+    field: ServiceName
+    gte: 10
+falsepositives:
+  - Vulnerability scanners and Active Directory assessment tools.
+  - Backup or monitoring agents that enumerate service accounts on a schedule.
+level: high

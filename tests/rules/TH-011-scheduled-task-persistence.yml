@@ -1,0 +1,45 @@
+rule: TH-011-scheduled-task-persistence
+description: >
+  Positives cover the SYSTEM-principal encoded payload, remote creation, and a public-directory
+  action registered through the PowerShell cmdlet. Negatives cover task enumeration (/query) and a
+  vendor updater task pointing at Program Files.
+cases:
+  - name: SYSTEM task running encoded PowerShell
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\schtasks.exe'
+      CommandLine: 'schtasks.exe /create /tn "MicrosoftEdgeUpdateCore" /tr "powershell -enc SQBFAFgA" /sc onlogon /ru system'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Remote task creation against another host
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\schtasks.exe'
+      CommandLine: 'schtasks.exe /create /s SRV02 /tn Updater /tr "cmd.exe /c C:\Windows\Temp\a.bat" /sc once /st 23:00'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Task registered through the PowerShell cmdlet with a public-directory action
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe Register-ScheduledTask -TaskName Sync -Action (New-ScheduledTaskAction -Execute C:\Users\Public\sync.exe)'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Task enumeration
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\schtasks.exe'
+      CommandLine: 'schtasks.exe /query /fo LIST /v'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Vendor updater task pointing at Program Files
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\schtasks.exe'
+      CommandLine: 'schtasks.exe /create /tn "ContosoAgentUpdate" /tr "C:\Program Files\Contoso\Agent\update.exe" /sc daily /st 03:00'
+      ParentImage: 'C:\Windows\System32\msiexec.exe'
+      User: 'NT AUTHORITY\SYSTEM'

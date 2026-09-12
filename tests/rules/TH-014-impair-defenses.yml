@@ -1,0 +1,69 @@
+rule: TH-014-impair-defenses
+description: >
+  Each positive represents one impairment category. The negatives are the two shapes that most often
+  cause false positives when rules key on the binary rather than the verb: querying event logs, and
+  adding (rather than disabling) a firewall rule.
+cases:
+  - name: Security log cleared with wevtutil
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\wevtutil.exe'
+      CommandLine: 'wevtutil.exe cl Security'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Defender exclusion added for a broad path
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: "powershell.exe Add-MpPreference -ExclusionPath 'C:\\'"
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Sysmon service stopped
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\net.exe'
+      CommandLine: 'net.exe stop sysmon64'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Audit policy cleared
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\auditpol.exe'
+      CommandLine: 'auditpol.exe /clear /y'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: AMSI provider key removal
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\reg.exe'
+      CommandLine: 'reg.exe delete "HKLM\SOFTWARE\Microsoft\AMSI\Providers" /f'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Host firewall disabled for all profiles
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\netsh.exe'
+      CommandLine: 'netsh.exe advfirewall set allprofiles state off'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Querying the event log is not clearing it
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\wevtutil.exe'
+      CommandLine: 'wevtutil.exe qe Security /c:10 /rd:true /f:text'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Firewall rule added for an application
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\netsh.exe'
+      CommandLine: 'netsh.exe advfirewall firewall add rule name="Contoso App" dir=in action=allow program="C:\Program Files\Contoso\app.exe"'
+      ParentImage: 'C:\Windows\System32\msiexec.exe'
+      User: 'NT AUTHORITY\SYSTEM'

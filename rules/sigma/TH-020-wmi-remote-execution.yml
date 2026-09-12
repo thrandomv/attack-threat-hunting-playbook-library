@@ -1,0 +1,56 @@
+title: Interpreter or Tooling Spawned by the WMI Provider Host
+id: 2bb7f020-43d0-4a20-8c20-7d6a1f200020
+status: experimental
+description: |
+  Detects command interpreters, transfer utilities and persistence tools executed as children of
+  wmiprvse.exe or scrcons.exe - the local footprint of WMI process creation, including remote
+  Win32_Process.Create calls. WMI operations that do not spawn a process (event subscriptions,
+  remote queries) are invisible here and need the WMI-Activity operational log.
+references:
+  - https://attack.mitre.org/techniques/T1047/
+  - https://attack.mitre.org/detectionstrategies/DET0364
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.execution
+  - attack.t1047
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_wmi_parent:
+    ParentImage|endswith:
+      - '\wmiprvse.exe'
+      - '\scrcons.exe'
+  selection_child:
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\rundll32.exe'
+      - '\regsvr32.exe'
+      - '\mshta.exe'
+      - '\wscript.exe'
+      - '\cscript.exe'
+      - '\certutil.exe'
+      - '\bitsadmin.exe'
+      - '\curl.exe'
+      - '\net.exe'
+      - '\net1.exe'
+      - '\schtasks.exe'
+      - '\sc.exe'
+      - '\reg.exe'
+      - '\vssadmin.exe'
+      - '\wevtutil.exe'
+  condition: selection_wmi_parent and selection_child
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Configuration Manager, monitoring and inventory agents that use WMI routinely.
+  - Backup software querying and controlling hosts through WMI.
+  - Administrative scripting from an approved management host.
+level: high

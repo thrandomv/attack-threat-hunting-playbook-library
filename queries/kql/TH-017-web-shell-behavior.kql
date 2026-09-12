@@ -1,0 +1,51 @@
+// TH-017 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Find command, discovery and transfer utilities spawned by web server processes.
+// Required data: DeviceProcessEvents with parent image, on internet-facing servers.
+// ATT&CK: T1505.003 | Detection strategy DET0394 / AN1108-AN1110
+// Tunable: WebParents (ParentProcess), SuspiciousChildren, ApprovedChildProcesses
+let Lookback = 7d;
+let WebParents = dynamic(["w3wp.exe", "httpd.exe", "apache.exe", "apache2.exe", "nginx.exe",
+                          "php-cgi.exe", "php.exe", "php-fpm", "tomcat.exe", "tomcat9.exe",
+                          "java.exe", "node.exe", "ruby.exe", "python.exe", "python3"]);
+let ShellsAndScripts = dynamic(["cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe",
+                                "sh", "bash", "dash", "zsh", "ksh"]);
+let DiscoveryTools   = dynamic(["whoami.exe", "net.exe", "net1.exe", "nltest.exe", "ipconfig.exe",
+                                "systeminfo.exe", "tasklist.exe", "quser.exe", "hostname.exe",
+                                "arp.exe", "netstat.exe", "id", "uname", "whoami"]);
+let TransferTools    = dynamic(["certutil.exe", "bitsadmin.exe", "curl.exe", "wget.exe", "ftp.exe",
+                                "scp.exe", "curl", "wget"]);
+let ApprovedChildProcesses = dynamic([]);   // Full paths only, after reviewing why the app shells out.
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| extend Parent = tolower(InitiatingProcessFileName), Child = tolower(FileName), Cmd = tolower(ProcessCommandLine)
+| where Parent in~ (WebParents)
+| where not(tolower(FolderPath) in~ (ApprovedChildProcesses))
+| extend ShellOrScript = Child in~ (ShellsAndScripts),
+         Discovery     = Child in~ (DiscoveryTools),
+         Transfer      = Child in~ (TransferTools) or Cmd contains "http://" or Cmd contains "https://",
+         AccountAction = Cmd contains " user " or Cmd contains " localgroup " or Cmd contains "add-localgroupmember"
+                         or Cmd contains "new-localuser" or Cmd contains "useradd" or Cmd contains "adduser",
+         Encoded       = Cmd contains "-enc" or Cmd contains "frombase64string" or Cmd contains "base64 -d"
+| where ShellOrScript or Discovery or Transfer or AccountAction
+| extend SignalCount = toint(ShellOrScript) + toint(Discovery) + toint(Transfer)
+                     + toint(AccountAction) + toint(Encoded),
+         Assessment = case(
+            AccountAction, "Account manipulation from a web process - treat as incident",
+            Transfer,      "Tool transfer from a web process",
+            Discovery,     "Host discovery from a web process",
+                           "Shell spawned by a web process")
+| project Timestamp, DeviceName, AccountDomain, AccountName, Assessment, FileName, FolderPath, SHA256,
+          ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessFolderPath,
+          InitiatingProcessCommandLine, InitiatingProcessAccountName, SignalCount,
+          ShellOrScript, Discovery, Transfer, AccountAction, Encoded
+| order by SignalCount desc, Timestamp desc
+//
+// Find the shell file itself (recent writes into a web root):
+// DeviceFileEvents
+// | where Timestamp > ago(Lookback) and ActionType in ("FileCreated", "FileModified")
+// | where FolderPath has_any ("\\inetpub\\wwwroot", "\\wwwroot\\", "/var/www/", "\\webapps\\", "\\htdocs\\")
+// | where FileName endswith ".aspx" or FileName endswith ".asp" or FileName endswith ".ashx"
+//      or FileName endswith ".php" or FileName endswith ".jsp" or FileName endswith ".jspx"
+// | project Timestamp, DeviceName, FolderPath, FileName, SHA256, InitiatingProcessFileName,
+//           InitiatingProcessAccountName
+// | order by Timestamp desc

@@ -1,0 +1,51 @@
+rule: TH-002-dcsync-replication-abuse
+description: >
+  Confirms the replication-right GUIDs are matched inside the Properties blob, and that both
+  allowlist branches (domain controller computer accounts, directory synchronisation accounts)
+  suppress the expected traffic.
+cases:
+  - name: User account exercises Replicating Directory Changes All
+    expect: match
+    event:
+      EventID: 4662
+      Computer: 'DC01.contoso.local'
+      SubjectUserName: 'jdoe'
+      SubjectUserSid: 'S-1-5-21-1111111111-2222222222-3333333333-1105'
+      ObjectName: 'DC=contoso,DC=local'
+      Properties: '%%7688 {1131f6ad-9c07-11d1-f79f-00c04fc2dcd2} {19195a5b-6da0-11d0-afd3-00c04fd930c9}'
+
+  - name: Compromised workstation account replicating
+    expect: match
+    event:
+      EventID: 4662
+      Computer: 'DC02.contoso.local'
+      SubjectUserName: 'WKS-4471$'
+      ObjectName: 'DC=contoso,DC=local'
+      Properties: '{1131f6aa-9c07-11d1-f79f-00c04fc2dcd2}'
+
+  - name: Domain controller performing normal replication
+    expect: no_match
+    event:
+      EventID: 4662
+      Computer: 'DC02.contoso.local'
+      SubjectUserName: 'DC01$'
+      ObjectName: 'DC=contoso,DC=local'
+      Properties: '{1131f6ad-9c07-11d1-f79f-00c04fc2dcd2}'
+
+  - name: Entra Connect synchronisation account
+    expect: no_match
+    event:
+      EventID: 4662
+      Computer: 'DC01.contoso.local'
+      SubjectUserName: 'MSOL_a1b2c3d4e5f6'
+      ObjectName: 'DC=contoso,DC=local'
+      Properties: '{1131f6ad-9c07-11d1-f79f-00c04fc2dcd2}'
+
+  - name: Unrelated directory access event
+    expect: no_match
+    event:
+      EventID: 4662
+      Computer: 'DC01.contoso.local'
+      SubjectUserName: 'jdoe'
+      ObjectName: 'CN=Users,DC=contoso,DC=local'
+      Properties: '{bf967aba-0de6-11d0-a285-00aa003049e2}'

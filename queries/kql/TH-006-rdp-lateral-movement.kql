@@ -1,0 +1,44 @@
+// TH-006 | Surface: Microsoft Sentinel / Log Analytics
+// Purpose: Identify RDP session fan-out and first-seen source/destination pairs.
+// Required data: SecurityEvent 4624 with LogonType 10 and a populated IpAddress.
+// ATT&CK: T1021.001 | Detection strategy DET0327 / AN0931
+// Tunable: Window (TimeWindow), MinDistinctTargets (HostAccessPatterns), ApprovedJumpHosts
+let Lookback = 7d;
+let Window = 30m;
+let MinDistinctTargets = 3;
+let LogonTypes = dynamic([10]);                 // add 7 to include reconnects to existing sessions
+let ApprovedJumpHosts = dynamic(["192.0.2.20"]); // RFC 5737 placeholder: replace with your jump hosts
+let BaselineDays = 30d;
+// Historical source/destination pairs, used to flag pairs seen for the first time.
+let KnownPairs = SecurityEvent
+    | where TimeGenerated between (ago(BaselineDays) .. ago(Lookback))
+    | where EventID == 4624 and toint(column_ifexists("LogonType", -1)) in (LogonTypes)
+    | extend SourceIp = tostring(column_ifexists("IpAddress", "")),
+             User = tostring(column_ifexists("TargetUserName", ""))
+    | distinct User, SourceIp, Computer;
+SecurityEvent
+| where TimeGenerated > ago(Lookback) and EventID == 4624
+| extend LogonTypeValue = toint(column_ifexists("LogonType", -1)),
+         SourceIp = tostring(column_ifexists("IpAddress", column_ifexists("ClientAddress", ""))),
+         User = tostring(column_ifexists("TargetUserName", "")),
+         UserDomain = tostring(column_ifexists("TargetDomainName", "")),
+         LogonId = tostring(column_ifexists("TargetLogonId", ""))
+| where LogonTypeValue in (LogonTypes)
+| where User !endswith "$" and User !in~ ("ANONYMOUS LOGON", "SYSTEM")
+| extend SourceIp = iff(SourceIp startswith "::ffff:", substring(SourceIp, 7), SourceIp)
+| where SourceIp !in ("", "-", "127.0.0.1", "::1") and SourceIp !in (ApprovedJumpHosts)
+| join kind=leftouter (KnownPairs | extend Known = true) on User, SourceIp, Computer
+| extend FirstSeenPair = isnull(Known)
+| summarize RdpLogons = count(), DistinctTargets = dcount(Computer),
+            Targets = make_set(Computer, 40), NewPairs = countif(FirstSeenPair),
+            NewPairTargets = make_set_if(Computer, FirstSeenPair, 20),
+            LogonIds = make_set(LogonId, 20),
+            FirstSeen = min(TimeGenerated), LastSeen = max(TimeGenerated)
+            by User, UserDomain, SourceIp, bin(TimeGenerated, Window)
+| where DistinctTargets >= MinDistinctTargets or NewPairs > 0
+| extend Severity = case(DistinctTargets >= MinDistinctTargets and NewPairs > 0, "high",
+                         DistinctTargets >= MinDistinctTargets, "medium",
+                         "low")
+| project TimeWindow = TimeGenerated, FirstSeen, LastSeen, Severity, User, UserDomain, SourceIp,
+          RdpLogons, DistinctTargets, NewPairs, NewPairTargets, Targets, LogonIds
+| order by Severity asc, DistinctTargets desc

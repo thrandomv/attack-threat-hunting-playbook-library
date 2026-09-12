@@ -1,0 +1,45 @@
+rule: TH-020-wmi-remote-execution
+description: >
+  Positives cover the three payload families seen under the provider host. Negatives separate an
+  inventory binary under the same parent from the interpreter list, and the same encoded command
+  under an ordinary parent, which belongs to TH-009.
+cases:
+  - name: Encoded PowerShell under wmiprvse
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe -NoP -enc SQBFAFgAIAAoAE4AZQB3AC0A'
+      ParentImage: 'C:\Windows\System32\wbem\wmiprvse.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: rundll32 executed through WMI
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\rundll32.exe'
+      CommandLine: 'rundll32.exe C:\Users\Public\p.dll,Start'
+      ParentImage: 'C:\Windows\System32\wbem\wmiprvse.exe'
+      User: 'CONTOSO\adm-jdoe'
+
+  - name: Scheduled task created through WMI
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\schtasks.exe'
+      CommandLine: 'schtasks.exe /create /tn Sync /tr "C:\Windows\Temp\s.exe" /sc onstart /ru system'
+      ParentImage: 'C:\Windows\System32\wbem\wmiprvse.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Inventory binary under the WMI provider host
+    expect: no_match
+    event:
+      Image: 'C:\Program Files\Contoso\Inventory\collect.exe'
+      CommandLine: 'collect.exe --wmi'
+      ParentImage: 'C:\Windows\System32\wbem\wmiprvse.exe'
+      User: 'CONTOSO\svc-inventory'
+
+  - name: Encoded PowerShell under an ordinary parent
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe -NoP -enc SQBFAFgAIAAoAE4AZQB3AC0A'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'

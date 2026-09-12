@@ -1,0 +1,66 @@
+title: PsExec-Style Remote Service Execution
+id: 2bb7f005-43d0-4a05-8c05-7d6a1f050005
+status: experimental
+description: |
+  Detects the two observable halves of PsExec-family lateral movement: a known service image from
+  the PsExec/PAExec/RemCom family, and any child of services.exe that is a command interpreter or
+  runs from a user-writable path. The second branch is the one that survives tool renaming, and it
+  is also the one that needs a local software-deployment allowlist.
+references:
+  - https://attack.mitre.org/techniques/T1021/002/
+  - https://attack.mitre.org/techniques/T1569/002/
+  - https://attack.mitre.org/detectionstrategies/DET0530
+author: Hamza Khella
+date: 2026-08-31
+modified: 2026-09-10
+tags:
+  - attack.lateral-movement
+  - attack.execution
+  - attack.t1021.002
+  - attack.t1569.002
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_known_tool:
+    Image|endswith:
+      - '\PSEXESVC.exe'
+      - '\psexesvc64.exe'
+      - '\paexec.exe'
+      - '\remcomsvc.exe'
+      - '\csexecsvc.exe'
+  selection_service_interpreter:
+    ParentImage|endswith: '\services.exe'
+    Image|endswith:
+      - '\cmd.exe'
+      - '\powershell.exe'
+      - '\pwsh.exe'
+      - '\cscript.exe'
+      - '\wscript.exe'
+      - '\mshta.exe'
+  selection_service_writable_path:
+    ParentImage|endswith: '\services.exe'
+    Image|contains:
+      - '\Windows\Temp\'
+      - '\Users\Public\'
+      - '\ProgramData\'
+      - '\AppData\'
+      - '\PerfLogs\'
+  selection_smbexec_pipe:
+    ParentImage|endswith: '\services.exe'
+    CommandLine|contains:
+      - '\pipe\'
+      - '%COMSPEC%'
+  filter_windows_defender_platform:
+    Image|contains: '\Windows Defender\Platform\'
+  condition: 1 of selection_* and not 1 of filter_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - Sysinternals PsExec used by administrators from a known management host.
+  - Software deployment and remote support agents that register temporary services.
+  - Endpoint agent updaters that stage binaries under ProgramData.
+level: high

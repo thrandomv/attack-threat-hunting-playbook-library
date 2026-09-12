@@ -1,0 +1,47 @@
+rule: TH-008-dns-tunneling
+description: >
+  The v1 rule fired on every TXT query, which is unusable in production. These cases lock in the
+  fix: encoded labels fire, ordinary TXT lookups (DMARC, domain verification) do not, and allowlisted
+  vendor suffixes with long labels stay silent.
+cases:
+  - name: Long encoded label
+    expect: match
+    event:
+      query: 'k5rgc3tfkrqxg4dbnvyhi2lpnzsxeidbnrwgs3tbozqxg2lom5uw4zjannqxgzjanfxgs5a.tunnel.example'
+      query_type: 'A'
+      src_ip: '10.2.3.4'
+
+  - name: Encoded TXT lookup at a lower length threshold
+    expect: match
+    event:
+      query: 'mfrggzdfmztwq2lknnwg23tpobyc4ylo.data.example'
+      query_type: 'TXT'
+      src_ip: '10.2.3.4'
+
+  - name: DMARC lookup must not fire
+    expect: no_match
+    event:
+      query: '_dmarc.contoso.com'
+      query_type: 'TXT'
+      src_ip: '10.2.3.9'
+
+  - name: Domain verification TXT record
+    expect: no_match
+    event:
+      query: 'contoso.com'
+      query_type: 'TXT'
+      src_ip: '10.2.3.9'
+
+  - name: Long label under an allowlisted security vendor suffix
+    expect: no_match
+    event:
+      query: 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2.sophosxl.net'
+      query_type: 'A'
+      src_ip: '10.2.3.9'
+
+  - name: Ordinary hostname lookup
+    expect: no_match
+    event:
+      query: 'intranet.contoso.com'
+      query_type: 'A'
+      src_ip: '10.2.3.9'

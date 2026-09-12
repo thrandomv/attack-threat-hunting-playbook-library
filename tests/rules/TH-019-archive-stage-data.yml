@@ -1,0 +1,53 @@
+rule: TH-019-archive-stage-data
+description: >
+  Positives cover password protection, volume splitting and temp-directory staging. Negatives cover
+  the two most common benign archive shapes: a scheduled backup writing to a backup volume, and a
+  build producing a release artefact.
+cases:
+  - name: Password-protected RAR of a user profile
+    expect: match
+    event:
+      Image: 'C:\Program Files\WinRAR\rar.exe'
+      CommandLine: 'rar.exe a -hpS3cret! -r C:\Windows\Temp\out.rar C:\Users\jdoe\Documents'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Split 7-Zip archive into a temp directory
+    expect: match
+    event:
+      Image: 'C:\Program Files\7-Zip\7z.exe'
+      CommandLine: '7z.exe a -v100m C:\Windows\Temp\data.7z D:\Shares\Finance'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\svc-report'
+
+  - name: Compress-Archive staging into ProgramData
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe Compress-Archive -Path D:\Shares\HR -DestinationPath C:\ProgramData\hr.zip'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Scheduled backup archiving to a backup volume
+    expect: no_match
+    event:
+      Image: 'C:\Program Files\7-Zip\7z.exe'
+      CommandLine: '7z.exe a E:\Backups\daily-2026-09-04.7z D:\AppData'
+      ParentImage: 'C:\Windows\System32\taskeng.exe'
+      User: 'NT AUTHORITY\SYSTEM'
+
+  - name: Build producing a release artefact
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\tar.exe'
+      CommandLine: 'tar.exe -czf C:\build\release\app-1.4.2.tar.gz C:\build\out'
+      ParentImage: 'C:\Program Files\Jenkins\agent.exe'
+      User: 'CONTOSO\svc-build'
+
+  - name: Ordinary user zipping a folder to the desktop
+    expect: no_match
+    event:
+      Image: 'C:\Program Files\7-Zip\7z.exe'
+      CommandLine: '7z.exe a C:\Users\jdoe\Desktop\photos.zip C:\Users\jdoe\Pictures'
+      ParentImage: 'C:\Windows\explorer.exe'
+      User: 'CONTOSO\jdoe'

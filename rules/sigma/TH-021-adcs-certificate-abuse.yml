@@ -1,0 +1,97 @@
+title: AD CS Certificate Request With a Requester-Supplied Subject Alternative Name
+id: 2bb7f021-43d0-4a21-8c21-7d6a1f210021
+status: experimental
+description: |
+  Detects a certificate request or issuance (Security 4886 / 4887) whose attributes carry a
+  requester-supplied subject alternative name. On a template with a client-authentication EKU and no
+  manager approval, this is the ESC1 misissuance path: the requester obtains a certificate that
+  authenticates as another principal. Web-server templates legitimately accept a SAN and must be
+  filtered by template name before deployment.
+references:
+  - https://attack.mitre.org/techniques/T1649/
+  - https://attack.mitre.org/detectionstrategies/DET0240
+author: Hamza Khella
+date: 2026-09-10
+modified: 2026-09-10
+tags:
+  - attack.credential-access
+  - attack.t1649
+logsource:
+  product: windows
+  service: security
+detection:
+  selection_ca_event:
+    EventID:
+      - 4886
+      - 4887
+  selection_san_attribute:
+    Attributes|contains:
+      - 'san:'
+      - 'SubjectAltName'
+      - 'upn='
+      - 'dns='
+  filter_san_templates:
+    CertificateTemplate|contains:
+      - 'WebServer'
+      - 'SSLCertificate'
+      - 'LoadBalancer'
+  condition: selection_ca_event and selection_san_attribute and not filter_san_templates
+fields:
+  - SubjectUserName
+  - CertificateTemplate
+  - Attributes
+  - RequestId
+  - Computer
+falsepositives:
+  - Web-server and load-balancer templates that legitimately accept a subject alternative name.
+  - Automated enrolment services that build the SAN in the request.
+level: critical
+---
+title: Active Directory Certificate Services Abuse Tooling
+id: 2bb7f121-43d0-4b21-8d21-7d6a1f210121
+status: experimental
+description: |
+  Detects endpoint execution of tooling associated with AD CS abuse - Certify, Certipy, and Rubeus
+  certificate-based ticket requests - plus certificate export from the local store. Tool names are
+  trivially renamed, so treat this as corroboration for the CA-side rule rather than as primary
+  coverage.
+references:
+  - https://attack.mitre.org/techniques/T1649/
+author: Hamza Khella
+date: 2026-09-10
+modified: 2026-09-10
+tags:
+  - attack.credential-access
+  - attack.t1649
+logsource:
+  category: process_creation
+  product: windows
+detection:
+  selection_tool_name:
+    Image|endswith:
+      - '\Certify.exe'
+      - '\certipy.exe'
+  selection_tool_arguments:
+    CommandLine|contains:
+      - 'certipy '
+      - 'Certify.exe find'
+      - 'Certify.exe request'
+      - '/template:'
+  selection_rubeus_certificate:
+    CommandLine|contains|all:
+      - 'asktgt'
+      - '/certificate:'
+  selection_export_pfx:
+    CommandLine|contains:
+      - '-exportPFX'
+      - 'Export-PfxCertificate'
+  condition: 1 of selection_*
+fields:
+  - Image
+  - CommandLine
+  - ParentImage
+  - User
+falsepositives:
+  - PKI administrators performing template review or certificate migration.
+  - Backup tooling exporting certificates with private keys during a documented change.
+level: high

@@ -1,0 +1,41 @@
+// TH-010 | Surface: Microsoft Defender XDR advanced hunting
+// Purpose: Detect signed system binaries executing attacker-controlled content.
+// Required data: DeviceProcessEvents with command line and parent image.
+// ATT&CK: T1218 (Stealth / TA0005) | Detection strategy DET0081 / AN0226
+// Tunable: ProxyBinaries (SignedBinaryList), writable paths (CommandLineRegex), parents (ParentProcessName)
+let Lookback = 7d;
+let ProxyBinaries = dynamic(["mshta.exe", "regsvr32.exe", "rundll32.exe", "msiexec.exe", "cmstp.exe",
+                             "installutil.exe", "regasm.exe", "regsvcs.exe", "odbcconf.exe",
+                             "mavinject.exe", "hh.exe", "msbuild.exe", "presentationhost.exe",
+                             "protocolhandler.exe", "microsoft.workflow.compiler.exe"]);
+let SuspiciousParents = dynamic(["winword.exe", "excel.exe", "powerpnt.exe", "outlook.exe",
+                                 "acrord32.exe", "mshta.exe", "w3wp.exe", "wmiprvse.exe",
+                                 "chrome.exe", "msedge.exe", "firefox.exe"]);
+let ApprovedInstallerPaths = dynamic([]);   // e.g. "\\\\deploy.contoso.local\\packages\\"
+DeviceProcessEvents
+| where Timestamp > ago(Lookback)
+| extend Image = tolower(FileName),
+         OriginalName = tolower(coalesce(column_ifexists("ProcessVersionInfoOriginalFileName", ""), FileName)),
+         Cmd = tolower(ProcessCommandLine)
+| where Image in~ (ProxyBinaries) or OriginalName in~ (ProxyBinaries)
+| extend RemoteContent   = Cmd contains "http://" or Cmd contains "https://" or Cmd contains "ftp://"
+                           or Cmd contains "\\\\",
+         ScriptOrCom     = Cmd contains "javascript:" or Cmd contains "vbscript:" or Cmd contains "script:"
+                           or Cmd contains "scrobj.dll" or Cmd contains "advpack.dll"
+                           or Cmd contains "ieadvpack.dll" or Cmd contains ".sct",
+         SuspiciousExport= (Image == "rundll32.exe" and (Cmd contains "minidump" or Cmd contains "shellexec_rundll"
+                           or Cmd contains "control_rundll" or Cmd contains "dllregisterserver")),
+         WritablePayload = Cmd contains "\\appdata\\" or Cmd contains "\\users\\public\\"
+                           or Cmd contains "\\windows\\temp\\" or Cmd contains "\\downloads\\"
+                           or Cmd contains "\\programdata\\" or Cmd contains "\\temp\\",
+         RenamedBinary   = OriginalName in~ (ProxyBinaries) and Image !in~ (ProxyBinaries),
+         SuspiciousParent= tolower(InitiatingProcessFileName) in~ (SuspiciousParents)
+| where RemoteContent or ScriptOrCom or SuspiciousExport or WritablePayload or RenamedBinary or SuspiciousParent
+| where not(Cmd has_any (ApprovedInstallerPaths))
+| extend SignalCount = toint(RemoteContent) + toint(ScriptOrCom) + toint(SuspiciousExport)
+                     + toint(WritablePayload) + toint(RenamedBinary) + toint(SuspiciousParent)
+| project Timestamp, DeviceName, AccountDomain, AccountName, FileName, OriginalName, FolderPath,
+          SHA256, ProcessCommandLine, InitiatingProcessFileName, InitiatingProcessCommandLine,
+          SignalCount, RemoteContent, ScriptOrCom, SuspiciousExport, WritablePayload,
+          RenamedBinary, SuspiciousParent
+| order by SignalCount desc, Timestamp desc
