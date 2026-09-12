@@ -11,7 +11,7 @@ playbook frontmatter.
 
 ### Added
 
-- **Sigma unit-test suite**: 158 cases across 36 rule documents, asserting true-positive and
+- **Sigma unit-test suite**: 160 cases across 36 rule documents, asserting true-positive and
   false-positive behaviour for every rule. CI fails if a rule lacks either kind of case.
 - **`scripts/sigma_eval.py`**: a Sigma evaluation engine written against the standard library
   (PyYAML is used only to read the rule files) — field modifiers, condition
@@ -59,7 +59,21 @@ playbook frontmatter.
   non-English Windows installation. Matching is now by well-known SID and RID, with a French-locale
   regression test.
 - **TH-009 Sigma condition.** `2 of (encoding, cradle, in_memory, hidden)` is not valid Sigma syntax.
-  Found by the new evaluation engine during authoring and rewritten as `2 of sig_*`.
+  Found by the new evaluation engine during authoring and rewritten as `2 of sig_*` — which is
+  specification-legal but unsupported by pySigma, whose grammar allows only the quantifiers `1`,
+  `any` and `all`. The rule now expands the threshold into its explicit pairs, `scripts/validate.py`
+  rejects any `N of` with N greater than one, and two test cases pin the two-signal boundary.
+  The divergence was caught by the pySigma conversion job in CI, not by the engine — an in-house
+  evaluator cannot detect that it is more permissive than the reference implementation.
+- **Sigma conversion job.** `sigma convert` requires an explicit processing pipeline; the job now
+  passes `-p splunk_windows` instead of exiting 2 before parsing. `sigma check` downloads the ATT&CK
+  STIX bundle and the D3FEND ontology at validation time, so its steps no longer mark a commit
+  failed when MITRE is unreachable.
+- **Validator scope.** The link and privacy pass walked every `*.md` under the repository root,
+  excluding only `.git` and `templates/`. A virtualenv created in-tree — which this repository's own
+  quick start invites — put thousands of vendored package READMEs inside that walk, so the assertion
+  count depended on the machine and a third-party file could have failed the build on a contact
+  string that was not ours. Non-content trees are now excluded and the count is reproducible.
 - **TH-004 / TH-006 exclusions.** Machine accounts and `ANONYMOUS LOGON` are now excluded from
   NTLM and RDP analytics, and LogonType 9 is covered for over-pass-the-hash tooling.
 - Recovery destruction (`vssadmin delete shadows` and relatives) moved out of TH-014 into TH-024,

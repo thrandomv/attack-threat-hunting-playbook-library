@@ -80,6 +80,14 @@ UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{
 LINK_RE = re.compile(r"(?<!!)\[[^\]]*\]\(([^)]+)\)")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 TECHNIQUE_TAG_RE = re.compile(r"^attack\.t\d{4}(?:\.\d{3})?$")
+# pySigma accepts only the quantifiers 1, any and all. Anything else is
+# specification-legal and unconvertible.
+UNPORTABLE_QUANTIFIER_RE = re.compile(r"(?<![\w.])(?!1\b)\d+\s+of\s+", re.I)
+# Directory names that are never repository content. Everything the validator walks
+# must be authored here, or the results depend on the machine rather than the repo.
+IGNORED_TREES = frozenset(
+    {".git", ".venv", "venv", "env", "node_modules", "__pycache__", "site", "site-src", "dist", "templates"}
+)
 # Personal details that belong on a CV, not in a public repository.
 CONTACT_PATTERNS = (
     (re.compile(r"\+\d{2,3}[\s-]?\d[\d\s-]{7,}"), "telephone number"),
@@ -357,6 +365,19 @@ def validate_sigma(report: Report, playbooks: dict[str, Any]) -> None:
                     f"{label}: detection blocks not referenced by the condition: "
                     f"{getattr(rule, 'unused_selections', [])}",
                 )
+                # The specification allows `N of <pattern>`, but pySigma's grammar is
+                # quantifier = Keyword("1") | Keyword("any") | Keyword("all"), so any
+                # other quantifier converts in no backend. The engine in this
+                # repository is more permissive than the reference implementation, so
+                # this is checked here rather than discovered at conversion time.
+                condition = str(rule.raw["detection"].get("condition", ""))
+                for quantifier in UNPORTABLE_QUANTIFIER_RE.findall(condition):
+                    report.check(
+                        False,
+                        f"{label}: quantifier {quantifier.strip()!r} is valid Sigma but "
+                        f"unsupported by pySigma; use 1 of / any of / all of, or expand "
+                        f"the threshold into explicit terms",
+                    )
 
         # Correlation rules must reference base rules that exist in the same file.
         base_names = {str(rule.raw.get("name")) for rule in detections if "name" in rule.raw}
@@ -405,7 +426,12 @@ def validate_tests(report: Report) -> None:
 def validate_links_and_privacy(report: Report) -> None:
     for path in sorted(ROOT.rglob("*.md")):
         # templates/ contains deliberate TH-0NN placeholders, so its links cannot resolve.
-        if ".git" in path.parts or "templates" in path.parts:
+        # The rest are not repository content: a virtualenv created in-tree (which this
+        # repository's own quick start suggests) carries thousands of vendored package
+        # READMEs, and scanning them makes the assertion count depend on which machine
+        # ran the check and lets a third-party file fail the build for a contact string
+        # that is not ours.
+        if set(path.parts) & IGNORED_TREES:
             continue
         text = path.read_text(encoding="utf-8")
         relative = path.relative_to(ROOT)

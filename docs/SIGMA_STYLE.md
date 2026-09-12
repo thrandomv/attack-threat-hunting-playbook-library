@@ -56,13 +56,25 @@ performs the aggregation and the playbook states the difference explicitly.
 ## Condition grammar
 
 Conditions use only portable Sigma syntax: `and`, `or`, `not`, parentheses, and the quantifiers
-`N of <pattern>`, `all of <pattern>`, `... of them`. Selection names are chosen so quantifiers work
-naturally (`sig_*` for scoring signals, `filter_*` for exclusions, `selection_*` for anchors).
+`1 of <pattern>`, `any of <pattern>`, `all of <pattern>`, `... of them`. Selection names are chosen
+so quantifiers work naturally (`sig_*` for scoring signals, `filter_*` for exclusions, `selection_*`
+for anchors).
 
-Two constructs are forbidden: in-condition aggregations (`| count() > 5`), which are deprecated in
-favour of correlations, and explicit lists inside a quantifier (`2 of (a, b, c)`), which is not
-Sigma syntax at all. The evaluation engine rejects both — it caught the second one in this
-repository's own PowerShell rule during authoring.
+Three constructs are forbidden:
+
+- **In-condition aggregations** (`| count() > 5`), deprecated in favour of correlation rules.
+- **Explicit lists inside a quantifier** (`2 of (a, b, c)`), which is not Sigma syntax at all.
+- **`N of <pattern>` for N greater than one.** This one is subtler, because it *is* in the Sigma
+  specification. pySigma — the reference implementation every backend is built on — defines its
+  grammar as `quantifier = Keyword("1") | Keyword("any") | Keyword("all")`, so `2 of sig_*` parses
+  under a spec-faithful reader and fails to convert in every real backend. A rule that needs an
+  "at least two of these" threshold expands it into explicit terms; TH-009 carries the worked
+  example, with a comment saying why and test cases pinning the boundary.
+
+The evaluation engine rejects the first two. The third is enforced by `scripts/validate.py`,
+because the engine is deliberately more permissive than pySigma here and cannot catch it —
+a divergence between an in-house engine and the reference implementation is exactly the kind of
+thing that only surfaces when someone else tries to use your content.
 
 ## Every rule ships with tests
 

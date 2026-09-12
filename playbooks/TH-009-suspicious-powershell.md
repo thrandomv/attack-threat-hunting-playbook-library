@@ -6,9 +6,9 @@ summary: PowerShell invoked with encoding, download cradles, in-memory execution
 status: production-candidate
 severity: high
 confidence: medium
-version: 2.0.0
+version: 2.0.1
 created: 2026-08-31
-updated: 2026-09-10
+updated: 2026-09-12
 review_cadence: monthly
 owner: SOC detection engineering
 platforms: [Windows]
@@ -106,6 +106,12 @@ covers an encoded hidden-window invocation, a download cradle piped to `IEX`, a 
 added from PowerShell, and — as negatives — an ordinary administrative one-liner and a signed
 management agent running a script from `Program Files`.
 
+Two further cases pin the two-signal threshold itself: exactly two signals under an ordinary parent
+must match, exactly one must not. The Sigma condition expresses that threshold as six explicit pairs
+rather than `2 of sig_*`, because pySigma implements only the quantifiers `1`, `any` and `all` — see
+[SIGMA_STYLE](../docs/SIGMA_STYLE.md#condition-grammar). Those two cases are what keep the expansion
+honest if anyone edits it.
+
 ## Triage workflow
 
 1. Decode the payload. Base64 in `-EncodedCommand` is UTF-16LE; decode it before judging severity.
@@ -168,6 +174,10 @@ where both the interesting administration and the intrusions live.
 
 ## Change log
 
+- 2026-09-12 (v2.0.1): Two-signal threshold expanded from `2 of sig_*` into explicit pairs. The
+  original is valid Sigma but pySigma implements only the quantifiers `1`, `any` and `all`, so the
+  rule converted in no backend. Logic is unchanged; two test cases now pin the boundary at exactly
+  one and exactly two signals.
 - 2026-09-10 (v2.0.0): Frontmatter, DET0455 alignment, substring matching for switches, `pwsh.exe`
   coverage, unit tests, Atomic validation table.
 - 2026-08-31 (v1.0.0): Initial version.

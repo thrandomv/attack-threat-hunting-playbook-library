@@ -94,6 +94,19 @@ the two rejection paths. It found a real bug during authoring: the TH-009 PowerS
 `2 of (encoding, cradle, in_memory, hidden)`, which is not valid Sigma syntax. A repository without
 an engine would have shipped it.
 
+### Where the engine is not enough
+
+The engine also found the limit of its own usefulness. The rewritten TH-009 condition —
+`2 of sig_*` — is valid per the Sigma specification, and the engine implements it, so the whole
+suite passed. pySigma does not implement it: its grammar allows only the quantifiers `1`, `any`
+and `all`, so the rule parsed here and failed to convert in the reference implementation. The CI
+conversion job caught it on the first public push.
+
+An in-house engine can only prove a rule against its own reading of the specification. Wherever
+that reading is more permissive than pySigma's, the gap is invisible to the tests, so it has to be
+closed by an explicit rule in `scripts/validate.py` and by running the content through pySigma in
+CI. Both are in place; the second one is why the conversion job exists at all.
+
 ## What the tests do not prove
 
 They prove the **logic** is sound against events shaped the way the rule expects. They do not prove:

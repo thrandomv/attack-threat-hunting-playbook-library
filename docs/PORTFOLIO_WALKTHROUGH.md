@@ -26,7 +26,7 @@ content; fewer people can show the review that found their own mistakes.
 
 Run it in this order. Each step answers a question an interviewer is actually going to ask.
 
-1. **`make check`** — runs the engine self-test (42 checks), the rule suite (158 cases), validation
+1. **`make check`** — runs the engine self-test (42 checks), the rule suite (160 cases), validation
    (4,600+ assertions), and the generated-artefact freshness check. Start here: it shows the content
    is verifiable, not just written.
 2. **`tests/rules/TH-018-password-spraying.yml`** — open it and read the negative cases. `50057`

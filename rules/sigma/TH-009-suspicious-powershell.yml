@@ -68,7 +68,21 @@ detection:
       - '\wscript.exe'
       - '\cscript.exe'
       - '\w3wp.exe'
-  condition: selection_powershell and (high_defence_change or 2 of sig_* or (parent_suspicious and 1 of sig_*))
+  # The Sigma specification permits `N of <pattern>`, but pySigma implements only
+  # `1 of`, `any of` and `all of` (sigma/conditions.py: quantifier = Keyword("1") |
+  # Keyword("any") | Keyword("all")). `2 of sig_*` therefore parses here and fails in
+  # every pySigma backend, so it is expanded into the six explicit pairs of the four
+  # signal selections. The semantics are unchanged: two or more independent signals,
+  # or one signal under a suspicious parent, or defence tampering on its own.
+  condition: >-
+    selection_powershell and (high_defence_change
+    or (parent_suspicious and 1 of sig_*)
+    or (sig_encoding and sig_cradle)
+    or (sig_encoding and sig_in_memory)
+    or (sig_encoding and sig_hidden)
+    or (sig_cradle and sig_in_memory)
+    or (sig_cradle and sig_hidden)
+    or (sig_in_memory and sig_hidden))
 fields:
   - CommandLine
   - ParentImage

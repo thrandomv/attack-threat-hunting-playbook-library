@@ -1,3 +1,6 @@
+# No `labels:` keys here on purpose. Dependabot cannot create labels that do not
+# already exist in the repository, and reports an error on every pull request when
+# it is asked to apply one that is missing.
 version: 2
 updates:
   - package-ecosystem: github-actions
@@ -6,7 +9,6 @@ updates:
       interval: monthly
     commit-message:
       prefix: ci
-    labels: [dependencies, ci]
 
   - package-ecosystem: pip
     directory: "/"
@@ -14,4 +16,3 @@ updates:
       interval: monthly
     commit-message:
       prefix: deps
-    labels: [dependencies]

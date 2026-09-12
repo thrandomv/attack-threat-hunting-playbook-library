@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -53,13 +53,18 @@ jobs:
       - name: Navigator layer is valid JSON
         run: python3 -c "import json,sys; json.load(open('mappings/attack-navigator-layer.json')); print('navigator layer OK')"
 
+  # Interoperability check against the reference implementation. The authoritative
+  # portability gate lives in scripts/validate.py, which runs in the job above with
+  # no network dependency; this job exists to show the rules through pySigma's own
+  # parser and a real backend. sigma check downloads the ATT&CK STIX bundle and the
+  # D3FEND ontology at validation time, so its steps are marked continue-on-error:
+  # a MITRE outage must not mark a commit failed. Read the log, not the badge.
   sigma-conversion:
     name: Sigma conversion smoke test
     runs-on: ubuntu-latest
-    continue-on-error: true   # upstream backend availability changes; informational only
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -71,12 +76,18 @@ jobs:
       - name: Install sigma-cli and a backend
         run: |
           pip install sigma-cli
-          sigma plugin install splunk || true
+          sigma plugin install splunk || pip install pysigma-backend-splunk
 
       - name: Validate rules against the Sigma specification
+        continue-on-error: true
         run: sigma check rules/sigma/
 
-      - name: Convert a representative rule
+      # sigma convert requires an explicit processing pipeline; without -p it exits 2
+      # before parsing anything. splunk_windows is the log-source pipeline these rules
+      # are written against.
+      - name: Convert representative rules through a real backend
+        continue-on-error: true
         run: |
-          sigma convert -t splunk rules/sigma/TH-001-lsass-memory-access.yml
-          sigma convert -t splunk rules/sigma/TH-024-inhibit-system-recovery.yml
+          sigma convert -t splunk -p splunk_windows rules/sigma/TH-001-lsass-memory-access.yml
+          sigma convert -t splunk -p splunk_windows rules/sigma/TH-009-suspicious-powershell.yml
+          sigma convert -t splunk -p splunk_windows rules/sigma/TH-024-inhibit-system-recovery.yml
