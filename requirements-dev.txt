@@ -12,4 +12,4 @@ yamllint>=1.38.0
 
 # Optional: Sigma conversion smoke tests (make sigma-convert)
 # Backend plugins are installed separately, e.g. `sigma plugin install splunk`
-sigma-cli>=3.1.0
+sigma-cli>=4.0.0
